@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+
+# Local trip ledger created by `tripkit init` in a project folder.
+.tripkit/
+
+# Scratch space for humans and agents; nothing here should be committed.
+tmp/

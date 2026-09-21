@@ -1,0 +1,67 @@
+{
+  "name": "@kovartravis/tripkit",
+  "version": "0.1.0",
+  "description": "Local-first trip ledger exposed as an MCP tool surface: trips, flights, stays, people, constrained day plans, packing lists, transit sketches, and ICS/markdown export. Your agent plans; Tripkit keeps the ledger.",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "travel",
+    "trip-planner",
+    "itinerary",
+    "ics",
+    "local-first",
+    "sqlite",
+    "ai-agents",
+    "cli",
+    "typescript"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "tripkit": "dist/cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kovartravis/tripkit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kovartravis/tripkit/issues"
+  },
+  "homepage": "https://github.com/kovartravis/tripkit#readme",
+  "author": "Travis Kovar (https://github.com/kovartravis)",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "docs/TOOLS.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/postbuild.mjs",
+    "test": "npm run build && vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node ./dist/cli.js mcp",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "env-paths": "^4.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
