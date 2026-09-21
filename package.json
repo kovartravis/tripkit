@@ -1,0 +1,61 @@
+{
+  "name": "@kovartravis/tripkit",
+  "version": "0.1.0",
+  "description": "Local-first trip ledger and MCP tool surface for personal agents: trips, flights, stays, day plans, packing lists, and exports.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "travel",
+    "trip-planning",
+    "itinerary",
+    "cli"
+  ],
+  "homepage": "https://github.com/kovartravis/tripkit#readme",
+  "bugs": {
+    "url": "https://github.com/kovartravis/tripkit/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kovartravis/tripkit.git"
+  },
+  "license": "MIT",
+  "author": "kovartravis",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "tripkit": "./dist/cli/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "env-paths": "^4.0.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}
