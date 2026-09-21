@@ -30,7 +30,7 @@ export function registerStayTools(server: McpServer, repo: TripkitRepository): v
     {
       title: "List stays",
       description: "List lodging on a trip, ordered by check-in.",
-      inputSchema: z.object({ tripId: idSchema }),
+      inputSchema: z.object({ tripId: idSchema.describe("Trip id") }),
     },
     safeHandler(({ tripId }) => repo.listStays(tripId)),
   );

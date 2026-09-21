@@ -31,7 +31,7 @@ export function registerTripTools(server: McpServer, repo: TripkitRepository): v
     {
       title: "Get trip",
       description: "Fetch a single trip by id.",
-      inputSchema: z.object({ id: idSchema }),
+      inputSchema: z.object({ id: idSchema.describe("Trip id") }),
     },
     safeHandler(({ id }) => {
       const trip = repo.getTrip(id);

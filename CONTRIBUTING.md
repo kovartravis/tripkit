@@ -6,7 +6,7 @@ project's non-goals below.
 
 ## Development setup
 
-Requires Node.js >= 22 (Tripkit uses the built-in `node:sqlite` module, which
+Requires Node.js >= 22.13 (Tripkit uses the built-in `node:sqlite` module, which
 needs no native build step).
 
 ```bash
@@ -31,14 +31,15 @@ Or point an MCP-capable client (Claude Desktop, etc.) at
 
 ```
 src/
+  version.ts  package name + version shared by the CLI and MCP server
   domain/     zod schemas, validation rules, and pure domain logic
               (packing generation, transit sketch, day-plan overlap check)
   db/         storage: the TripkitRepository interface, SQLite schema,
               and the SqliteTripkitRepository implementation
   export/     markdown and ICS export, built on top of the repository
-  mcp/        MCP server wiring and the 14 tripkit_* tool registrations
+  mcp/        MCP server wiring and the tripkit_* tool registrations
   cli/        the `tripkit` CLI entry point (mcp / init / status)
-test/         vitest unit tests
+test/         vitest unit and MCP in-process tests
 docs/TOOLS.md per-tool parameter/return reference
 ```
 
@@ -55,7 +56,8 @@ docs/TOOLS.md per-tool parameter/return reference
   (see `assertNoOverlaps` for the day-plan overlap check) so it's easy to
   unit test without touching the database.
 - Run `npm run build` (type check) and `npm test` before opening a PR. CI
-  runs both.
+  runs both. Point `TRIPKIT_DATA_DIR` at a temp directory if you don't want
+  a test or local MCP session to touch `~/.local/share/tripkit`.
 
 ## Scope
 

@@ -31,7 +31,7 @@ export function registerFlightTools(server: McpServer, repo: TripkitRepository):
     {
       title: "List flights",
       description: "List flights on a trip, ordered by departure time.",
-      inputSchema: z.object({ tripId: idSchema }),
+      inputSchema: z.object({ tripId: idSchema.describe("Trip id") }),
     },
     safeHandler(({ tripId }) => repo.listFlights(tripId)),
   );

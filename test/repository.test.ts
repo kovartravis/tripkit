@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDatabase } from "../src/db/client.js";
 import { SqliteTripkitRepository } from "../src/db/sqliteRepository.js";
-import { OverlappingBlocksError } from "../src/domain/validation.js";
+import { OverlappingBlocksError, ValidationError } from "../src/domain/validation.js";
 import { NotFoundError } from "../src/db/repository.js";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -89,6 +89,36 @@ describe("SqliteTripkitRepository", () => {
 
     expect(updated.blocks).toHaveLength(3);
     expect(updated.blocks.map((b) => b.title)).toEqual(["Senso-ji", "Nakamise shopping", "Ramen lunch"]);
+  });
+
+  it("re-sorts day plan blocks by startTime before persisting", () => {
+    const trip = repo.createTrip({
+      name: "Japan 2026",
+      startDate: "2026-04-10",
+      endDate: "2026-04-20",
+      homeTimezone: "America/Los_Angeles",
+    });
+    const day = repo.upsertDay({ tripId: trip.id, date: "2026-04-12" });
+    const updated = repo.setDayPlan(day.id, [
+      { startTime: "12:15", endTime: "13:15", type: "meal", title: "Lunch" },
+      { startTime: "09:00", endTime: "10:30", type: "activity", title: "Morning" },
+    ]);
+    expect(updated.blocks.map((b) => b.title)).toEqual(["Morning", "Lunch"]);
+  });
+
+  it("rejects listing or querying a nonexistent trip", () => {
+    expect(() => repo.listFlights("trip_missing")).toThrow(NotFoundError);
+    expect(() => repo.query("trip_missing", { entityTypes: ["trip"] })).toThrow(NotFoundError);
+  });
+
+  it("rejects a trip update that inverts the date range", () => {
+    const trip = repo.createTrip({
+      name: "Japan 2026",
+      startDate: "2026-04-10",
+      endDate: "2026-04-20",
+      homeTimezone: "America/Los_Angeles",
+    });
+    expect(() => repo.updateTrip({ id: trip.id, startDate: "2026-04-22" })).toThrow(ValidationError);
   });
 
   it("rejects overlapping day plan blocks", () => {

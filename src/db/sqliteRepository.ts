@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { assertNoOverlaps } from "../domain/validation.js";
+import { assertEndAfterStart, assertEndOnOrAfterStart, assertNoOverlaps, isIanaTimeZone, sortBlocks, ValidationError } from "../domain/validation.js";
 import type {
   Day,
   DayBlock,
@@ -21,6 +21,7 @@ import type {
 } from "../domain/types.js";
 import { newId, nowIso } from "../utils/id.js";
 import { NotFoundError, type QueryFilters, type QueryResult, type TripkitRepository } from "./repository.js";
+import { withTransaction } from "./client.js";
 
 /** SQLite row shapes (snake_case, as stored) */
 interface TripRow {
@@ -214,6 +215,10 @@ export class SqliteTripkitRepository implements TripkitRepository {
   // ---------------------------------------------------------------- trips
 
   createTrip(input: TripCreateInput): Trip {
+    assertEndOnOrAfterStart(input.startDate, input.endDate);
+    if (!isIanaTimeZone(input.homeTimezone)) {
+      throw new ValidationError("expected IANA timezone name, e.g. America/Los_Angeles");
+    }
     const id = newId("trip");
     const ts = nowIso();
     this.db
@@ -236,6 +241,10 @@ export class SqliteTripkitRepository implements TripkitRepository {
       notes: input.notes ?? existing.notes,
       updatedAt: nowIso(),
     };
+    assertEndOnOrAfterStart(merged.startDate, merged.endDate);
+    if (!isIanaTimeZone(merged.homeTimezone)) {
+      throw new ValidationError("expected IANA timezone name, e.g. America/Los_Angeles");
+    }
     this.db
       .prepare(
         `UPDATE trips SET name = ?, start_date = ?, end_date = ?, home_timezone = ?, notes = ?, updated_at = ?
@@ -307,6 +316,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
   }
 
   listPeople(tripId: string): Person[] {
+    this.getTripOrThrow(tripId);
     const rows = this.db
       .prepare(`SELECT * FROM people WHERE trip_id = ? ORDER BY created_at ASC`)
       .all(tripId) as unknown as PersonRow[];
@@ -317,6 +327,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
 
   addFlight(input: FlightAddInput): Flight {
     this.getTripOrThrow(input.tripId);
+    assertEndAfterStart(input.departureTime, input.arrivalTime, "departureTime", "arrivalTime");
     const id = newId("flight");
     const ts = nowIso();
     this.db
@@ -360,6 +371,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
       notes: input.notes ?? existing.notes,
       updatedAt: nowIso(),
     };
+    assertEndAfterStart(merged.departureTime, merged.arrivalTime, "departureTime", "arrivalTime");
     this.db
       .prepare(
         `UPDATE flights SET airline = ?, flight_number = ?, departure_airport = ?, arrival_airport = ?,
@@ -391,6 +403,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
   }
 
   listFlights(tripId: string): Flight[] {
+    this.getTripOrThrow(tripId);
     const rows = this.db
       .prepare(`SELECT * FROM flights WHERE trip_id = ? ORDER BY departure_time ASC`)
       .all(tripId) as unknown as FlightRow[];
@@ -401,6 +414,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
 
   addStay(input: StayAddInput): Stay {
     this.getTripOrThrow(input.tripId);
+    assertEndAfterStart(input.checkIn, input.checkOut, "checkIn", "checkOut");
     const id = newId("stay");
     const ts = nowIso();
     this.db
@@ -438,6 +452,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
       notes: input.notes ?? existing.notes,
       updatedAt: nowIso(),
     };
+    assertEndAfterStart(merged.checkIn, merged.checkOut, "checkIn", "checkOut");
     this.db
       .prepare(
         `UPDATE stays SET name = ?, check_in = ?, check_out = ?, address = ?, confirmation = ?, guest_ids = ?,
@@ -465,6 +480,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
   }
 
   listStays(tripId: string): Stay[] {
+    this.getTripOrThrow(tripId);
     const rows = this.db
       .prepare(`SELECT * FROM stays WHERE trip_id = ? ORDER BY check_in ASC`)
       .all(tripId) as unknown as StayRow[];
@@ -519,6 +535,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
   }
 
   listDays(tripId: string, range?: { startDate?: string; endDate?: string }): Day[] {
+    this.getTripOrThrow(tripId);
     const rows = this.db
       .prepare(`SELECT * FROM days WHERE trip_id = ? ORDER BY date ASC`)
       .all(tripId) as unknown as DayRow[];
@@ -548,7 +565,8 @@ export class SqliteTripkitRepository implements TripkitRepository {
 
   setDayPlan(dayId: string, blocks: DayBlockInput[]): Day {
     this.getDayOrThrow(dayId);
-    assertNoOverlaps(blocks);
+    const ordered = sortBlocks(blocks);
+    assertNoOverlaps(ordered);
 
     const del = this.db.prepare(`DELETE FROM day_blocks WHERE day_id = ?`);
     const insert = this.db.prepare(
@@ -557,21 +575,23 @@ export class SqliteTripkitRepository implements TripkitRepository {
     );
     const touch = this.db.prepare(`UPDATE days SET updated_at = ? WHERE id = ?`);
 
-    del.run(dayId);
-    blocks.forEach((block, index) => {
-      insert.run(
-        newId("block"),
-        dayId,
-        index,
-        block.startTime,
-        block.endTime,
-        block.type,
-        block.title,
-        n(block.place),
-        n(block.notes),
-      );
+    withTransaction(this.db, () => {
+      del.run(dayId);
+      ordered.forEach((block, index) => {
+        insert.run(
+          newId("block"),
+          dayId,
+          index,
+          block.startTime,
+          block.endTime,
+          block.type,
+          block.title,
+          n(block.place),
+          n(block.notes),
+        );
+      });
+      touch.run(nowIso(), dayId);
     });
-    touch.run(nowIso(), dayId);
 
     return this.getDayOrThrow(dayId);
   }
@@ -579,6 +599,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
   // ------------------------------------------------------------- packing
 
   listPackingItems(tripId: string): PackingItem[] {
+    this.getTripOrThrow(tripId);
     const rows = this.db
       .prepare(`SELECT * FROM packing_items WHERE trip_id = ? ORDER BY category ASC, label ASC`)
       .all(tripId) as unknown as PackingItemRow[];
@@ -591,14 +612,16 @@ export class SqliteTripkitRepository implements TripkitRepository {
   ): PackingItem[] {
     this.getTripOrThrow(tripId);
     const ts = nowIso();
-    this.db.prepare(`DELETE FROM packing_items WHERE trip_id = ?`).run(tripId);
-    const insert = this.db.prepare(
-      `INSERT INTO packing_items (id, trip_id, category, label, quantity, packed, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)`,
-    );
-    for (const item of items) {
-      insert.run(newId("pack"), tripId, item.category, item.label, item.quantity, ts, ts);
-    }
+    withTransaction(this.db, () => {
+      this.db.prepare(`DELETE FROM packing_items WHERE trip_id = ?`).run(tripId);
+      const insert = this.db.prepare(
+        `INSERT INTO packing_items (id, trip_id, category, label, quantity, packed, notes, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)`,
+      );
+      for (const item of items) {
+        insert.run(newId("pack"), tripId, item.category, item.label, item.quantity, ts, ts);
+      }
+    });
     return this.listPackingItems(tripId);
   }
 
@@ -617,51 +640,53 @@ export class SqliteTripkitRepository implements TripkitRepository {
     this.getTripOrThrow(tripId);
     const ts = nowIso();
 
-    for (const id of removeIds) {
-      this.db.prepare(`DELETE FROM packing_items WHERE id = ? AND trip_id = ?`).run(id, tripId);
-    }
-
-    for (const item of upserts) {
-      if (item.id) {
-        const existingRow = this.db
-          .prepare(`SELECT * FROM packing_items WHERE id = ? AND trip_id = ?`)
-          .get(item.id, tripId) as PackingItemRow | undefined;
-        if (!existingRow) throw new NotFoundError("packingItem", item.id);
-        const existing = toPackingItem(existingRow);
-        const merged: PackingItem = {
-          ...existing,
-          category: item.category ?? existing.category,
-          label: item.label,
-          quantity: item.quantity ?? existing.quantity,
-          packed: item.packed ?? existing.packed,
-          notes: item.notes ?? existing.notes,
-          updatedAt: ts,
-        };
-        this.db
-          .prepare(
-            `UPDATE packing_items SET category = ?, label = ?, quantity = ?, packed = ?, notes = ?, updated_at = ?
-             WHERE id = ?`,
-          )
-          .run(merged.category, merged.label, merged.quantity, merged.packed ? 1 : 0, n(merged.notes), ts, merged.id);
-      } else {
-        this.db
-          .prepare(
-            `INSERT INTO packing_items (id, trip_id, category, label, quantity, packed, notes, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            newId("pack"),
-            tripId,
-            item.category ?? "misc",
-            item.label,
-            item.quantity ?? 1,
-            item.packed ? 1 : 0,
-            n(item.notes),
-            ts,
-            ts,
-          );
+    withTransaction(this.db, () => {
+      for (const id of removeIds) {
+        this.db.prepare(`DELETE FROM packing_items WHERE id = ? AND trip_id = ?`).run(id, tripId);
       }
-    }
+
+      for (const item of upserts) {
+        if (item.id) {
+          const existingRow = this.db
+            .prepare(`SELECT * FROM packing_items WHERE id = ? AND trip_id = ?`)
+            .get(item.id, tripId) as PackingItemRow | undefined;
+          if (!existingRow) throw new NotFoundError("packingItem", item.id);
+          const existing = toPackingItem(existingRow);
+          const merged: PackingItem = {
+            ...existing,
+            category: item.category ?? existing.category,
+            label: item.label,
+            quantity: item.quantity ?? existing.quantity,
+            packed: item.packed ?? existing.packed,
+            notes: item.notes ?? existing.notes,
+            updatedAt: ts,
+          };
+          this.db
+            .prepare(
+              `UPDATE packing_items SET category = ?, label = ?, quantity = ?, packed = ?, notes = ?, updated_at = ?
+               WHERE id = ?`,
+            )
+            .run(merged.category, merged.label, merged.quantity, merged.packed ? 1 : 0, n(merged.notes), ts, merged.id);
+        } else {
+          this.db
+            .prepare(
+              `INSERT INTO packing_items (id, trip_id, category, label, quantity, packed, notes, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+              newId("pack"),
+              tripId,
+              item.category ?? "misc",
+              item.label,
+              item.quantity ?? 1,
+              item.packed ? 1 : 0,
+              n(item.notes),
+              ts,
+              ts,
+            );
+        }
+      }
+    });
 
     return this.listPackingItems(tripId);
   }
@@ -669,6 +694,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
   // ----------------------------------------------------------------- query
 
   query(tripId: string, filters: QueryFilters): QueryResult {
+    this.getTripOrThrow(tripId);
     const result: QueryResult = {};
     const types = new Set(filters.entityTypes);
 

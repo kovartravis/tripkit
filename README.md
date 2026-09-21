@@ -19,30 +19,9 @@ Tuesday" to live in a form the agent can reliably re-read, update, and
 export later. Tripkit gives agents a small set of typed tools backed by a
 real local database, so trip state survives across sessions and tools.
 
-## What Tripkit is / isn't
-
-**Owns (v1):**
-- A local-first trip ledger: trips, flights, stays, days, people
-- MCP tools to add/update/query those entities
-- Constrained day plans (time-boxed blocks that can't overlap), packing
-  lists, and rough transit sketches
-- Markdown and ICS (calendar) export
-
-**Does not own (v1):**
-- Being the chat planner itself — that's your agent's job, not Tripkit's
-- Full airline/hotel booking or checkout — Tripkit stores confirmation
-  numbers you already have; it doesn't buy anything
-- Live routing, pricing, or availability APIs — transit sketches are
-  deterministic placeholder estimates, not real quotes
-
-**Deploy path:** local-first today — an stdio MCP server plus a CLI, backed
-by a SQLite file on disk. Storage sits behind a `TripkitRepository`
-interface so a hosted backend can be added later, once there's reason to;
-that's a deliberate non-goal for this release, not an oversight.
-
 ## Install
 
-Requires **Node.js >= 22** (Tripkit uses the built-in `node:sqlite` module,
+Requires **Node.js >= 22.13** (Tripkit uses the built-in `node:sqlite` module,
 so there's no native dependency to compile).
 
 ```bash
@@ -99,7 +78,7 @@ readable.
 
 ## Tools
 
-All 14 tools are prefixed `tripkit_`. Full parameter and return-value
+All tools are prefixed `tripkit_`. Full parameter and return-value
 reference: [`docs/TOOLS.md`](docs/TOOLS.md).
 
 | Tool | Purpose |
@@ -128,6 +107,27 @@ reference: [`docs/TOOLS.md`](docs/TOOLS.md).
 | `tripkit_export_markdown` | Export a trip or single day as markdown |
 | `tripkit_export_ics` | Export flights/stays/day blocks as an ICS calendar |
 
+## What Tripkit is / isn't
+
+**Owns (v1):**
+- A local-first trip ledger: trips, flights, stays, days, people
+- MCP tools to add/update/query those entities
+- Constrained day plans (time-boxed blocks that can't overlap), packing
+  lists, and rough transit sketches
+- Markdown and ICS (calendar) export
+
+**Does not own (v1):**
+- Being the chat planner itself — that's your agent's job, not Tripkit's
+- Full airline/hotel booking or checkout — Tripkit stores confirmation
+  numbers you already have; it doesn't buy anything
+- Live routing, pricing, or availability APIs — transit sketches are
+  deterministic placeholder estimates, not real quotes
+
+**Deploy path:** local-first today — an stdio MCP server plus a CLI, backed
+by a SQLite file on disk. Storage sits behind a `TripkitRepository`
+interface so a hosted backend can be added later, once there's reason to;
+that's a deliberate non-goal for this release, not an oversight.
+
 ## CLI
 
 ```
@@ -140,12 +140,12 @@ tripkit status    Show where Tripkit's data lives and a quick summary
 
 Data lives in a SQLite file — either `.tripkit/tripkit.db` in the current
 project (after `tripkit init`), or a per-user data directory shared across
-projects if you haven't initialized one locally. Trips, people, flights,
-stays, days, day blocks, and packing items each get their own table, with
-foreign keys cascading from trips. All access goes through the
-`TripkitRepository` interface (`src/db/repository.ts`), so the storage
-layer can be swapped — for a hosted backend, say — without touching the MCP
-tool code.
+projects if you haven't initialized one locally. Set `TRIPKIT_DATA_DIR` to
+point at a specific directory instead. Trips, people, flights, stays, days,
+day blocks, and packing items each get their own table, with foreign keys
+cascading from trips. All access goes through the `TripkitRepository`
+interface (`src/db/repository.ts`), so the storage layer can be swapped —
+for a hosted backend, say — without touching the MCP tool code.
 
 ## Development
 

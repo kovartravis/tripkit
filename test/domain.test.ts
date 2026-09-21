@@ -25,6 +25,16 @@ describe("schema validation", () => {
     expect(result.success).toBe(false);
   });
 
+  it("rejects a non-IANA home timezone", () => {
+    const result = tripCreateInputSchema.safeParse({
+      name: "Wherever",
+      startDate: "2026-06-01",
+      endDate: "2026-06-10",
+      homeTimezone: "Not/AZone",
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("rejects a day block whose end time precedes its start time", () => {
     const result = dayBlockInputSchema.safeParse({
       startTime: "12:00",

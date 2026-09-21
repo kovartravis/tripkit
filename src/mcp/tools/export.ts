@@ -7,8 +7,8 @@ import { safeHandler } from "../toolResult.js";
 import { z } from "zod";
 
 const exportInputSchema = z.object({
-  tripId: idSchema,
-  dayId: idSchema.optional(),
+  tripId: idSchema.describe("Trip to export"),
+  dayId: idSchema.optional().describe("If set, scope the export to this day"),
 });
 
 export function registerExportTools(server: McpServer, repo: TripkitRepository): void {

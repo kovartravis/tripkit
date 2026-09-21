@@ -4,10 +4,12 @@
   "description": "Local-first trip ledger and MCP tool surface for personal agents: trips, flights, stays, day plans, packing lists, and exports.",
   "keywords": [
     "mcp",
+    "mcp-server",
     "model-context-protocol",
     "travel",
     "trip-planning",
     "itinerary",
+    "local-first",
     "cli"
   ],
   "homepage": "https://github.com/kovartravis/tripkit#readme",
@@ -19,10 +21,10 @@
     "url": "git+https://github.com/kovartravis/tripkit.git"
   },
   "license": "MIT",
-  "author": "kovartravis",
+  "author": "Travis Kovar (https://github.com/kovartravis)",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "bin": {
     "tripkit": "./dist/cli/index.js"
@@ -42,11 +44,14 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('dist/cli/index.js', 0o755)\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

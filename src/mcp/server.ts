@@ -9,9 +9,9 @@ import { registerPackingTools } from "./tools/packing.js";
 import { registerTransitTools } from "./tools/transit.js";
 import { registerQueryTools } from "./tools/query.js";
 import { registerExportTools } from "./tools/export.js";
+import { TRIPKIT_SERVER_NAME, TRIPKIT_SERVER_VERSION } from "../version.js";
 
-export const TRIPKIT_SERVER_NAME = "tripkit";
-export const TRIPKIT_SERVER_VERSION = "0.1.0";
+export { TRIPKIT_SERVER_NAME, TRIPKIT_SERVER_VERSION };
 
 export function createTripkitMcpServer(repo: TripkitRepository): McpServer {
   const server = new McpServer({

@@ -6,3 +6,6 @@ npm-debug.log*
 coverage/
 .tripkit/
 *.tsbuildinfo
+tmp/
+.env
+.env.*

@@ -29,7 +29,7 @@ export function registerPackingTools(server: McpServer, repo: TripkitRepository)
       const generated = generatePackingItems({
         nights: nightsBetween(trip.startDate, trip.endDate),
         travelerCount,
-        climateHints,
+        climateHints: climateHints ?? ["mild"],
         activityHints: activityHints ?? [],
       });
 
@@ -54,6 +54,8 @@ export function registerPackingTools(server: McpServer, repo: TripkitRepository)
       description: "Check off, edit, add, or remove packing list items on a trip.",
       inputSchema: packingListUpdateInputSchema,
     },
-    safeHandler(({ tripId, upserts, removeIds }) => repo.upsertPackingItems(tripId, upserts, removeIds)),
+    safeHandler(({ tripId, upserts, removeIds }) =>
+      repo.upsertPackingItems(tripId, upserts ?? [], removeIds ?? []),
+    ),
   );
 }

@@ -12,18 +12,18 @@ import { z } from "zod";
 
 const dayGetInputSchema = z
   .object({
-    id: idSchema.optional(),
-    tripId: idSchema.optional(),
-    date: dateSchema.optional(),
+    id: idSchema.optional().describe("Day id"),
+    tripId: idSchema.optional().describe("Trip id (used with date)"),
+    date: dateSchema.optional().describe("Calendar date (YYYY-MM-DD), used with tripId"),
   })
   .refine((v) => v.id || (v.tripId && v.date), {
     message: "provide either id, or tripId + date",
   });
 
 const dayListInputSchema = z.object({
-  tripId: idSchema,
-  startDate: dateSchema.optional(),
-  endDate: dateSchema.optional(),
+  tripId: idSchema.describe("Trip id"),
+  startDate: dateSchema.optional().describe("Inclusive lower bound (YYYY-MM-DD)"),
+  endDate: dateSchema.optional().describe("Inclusive upper bound (YYYY-MM-DD)"),
 });
 
 export function registerDayTools(server: McpServer, repo: TripkitRepository): void {

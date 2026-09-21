@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
@@ -29,7 +37,7 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Verify CLI starts
+      - name: Verify CLI
         run: |
-          echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | timeout 5 node dist/cli/index.js mcp > /tmp/tools.json || true
-          grep -q 'tripkit_trip_create' /tmp/tools.json
+          node dist/cli/index.js --help | grep -q 'tripkit mcp'
+          test -x dist/cli/index.js

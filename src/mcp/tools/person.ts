@@ -30,7 +30,7 @@ export function registerPersonTools(server: McpServer, repo: TripkitRepository):
     {
       title: "List people",
       description: "List travelers on a trip.",
-      inputSchema: z.object({ tripId: idSchema }),
+      inputSchema: z.object({ tripId: idSchema.describe("Trip id") }),
     },
     safeHandler(({ tripId }) => repo.listPeople(tripId)),
   );
