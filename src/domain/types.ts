@@ -363,6 +363,30 @@ export const placeCandidateSchema = z.object({
 export type PlaceCandidate = z.infer<typeof placeCandidateSchema>;
 
 /**
+ * Invite
+ */
+export const inviteStatusSchema = z.enum(["pending", "accepted", "revoked"]);
+export type InviteStatus = z.infer<typeof inviteStatusSchema>;
+
+export const inviteSchema = z.object({
+  id: idSchema,
+  tripId: idSchema,
+  email: z.email(),
+  invitedByAccountId: idSchema,
+  status: inviteStatusSchema,
+  acceptedAccountId: idSchema.optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Invite = z.infer<typeof inviteSchema>;
+
+export const inviteCreateInputSchema = z.object({
+  tripId: idSchema,
+  email: z.email(),
+});
+export type InviteCreateInput = z.infer<typeof inviteCreateInputSchema>;
+
+/**
  * Query
  */
 export const queryEntityTypeSchema = z.enum([

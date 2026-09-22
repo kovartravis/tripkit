@@ -279,6 +279,30 @@ in v1; durations are placeholder estimates by mode.
 
 ---
 
+## Invites
+
+Only registered when running against Supabase (a `SupabaseInviteService` was passed to
+`createTripkitMcpServer`) — not available in local/SQLite mode. As of this writing,
+`httpServer.ts` doesn't construct or pass one yet (ticket #23 wires that up as part of
+retiring SQLite entirely); this tool and automatic redemption are functional but not yet
+reachable through the running server.
+
+### `tripkit_invite_create`
+
+Invite someone by email to join a trip you own. Callable only by the trip's Owner. If the
+email already has a Supabase Account, no duplicate account is created — either way, the
+invited Account is granted `trip_members` access automatically the next time they
+authenticate, no explicit accept step.
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `tripId` | string | yes | must be a trip you own |
+| `email` | string | yes | |
+
+**Returns:** the created `Invite` (`status: "pending"`).
+
+---
+
 ## Query & export
 
 ### `tripkit_query`
