@@ -11,16 +11,16 @@ describe("buildDayItineraries", () => {
   let repo: SqliteTripkitRepository;
   let trip: Trip;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     db = openDatabase(":memory:");
     repo = new SqliteTripkitRepository(db);
-    trip = repo.createTrip({
+    trip = await repo.createTrip({
       name: "Japan 2026",
       startDate: "2026-04-10",
       endDate: "2026-04-13",
       homeTimezone: "America/Los_Angeles",
     });
-    repo.addFlight({
+    await repo.addFlight({
       tripId: trip.id,
       airline: "ANA",
       flightNumber: "NH7",
@@ -29,29 +29,29 @@ describe("buildDayItineraries", () => {
       departureTime: "2026-04-10T13:15:00-07:00",
       arrivalTime: "2026-04-11T16:50:00+09:00",
     });
-    repo.addStay({
+    await repo.addStay({
       tripId: trip.id,
       name: "Park Hyatt Tokyo",
       checkIn: "2026-04-11T15:00:00+09:00",
       checkOut: "2026-04-13T11:00:00+09:00",
     });
-    const day = repo.upsertDay({ tripId: trip.id, date: "2026-04-12", title: "Tokyo" });
-    repo.setDayPlan(day.id, [{ startTime: "09:00", endTime: "10:30", type: "activity", title: "Senso-ji" }]);
+    const day = await repo.upsertDay({ tripId: trip.id, date: "2026-04-12", title: "Tokyo" });
+    await repo.setDayPlan(day.id, [{ startTime: "09:00", endTime: "10:30", type: "activity", title: "Senso-ji" }]);
   });
 
   afterEach(() => {
     repo.close();
   });
 
-  it("covers every calendar date in the trip range, including ones with no Day record", () => {
-    const bundle = loadTripExportBundle(repo, trip.id);
+  it("covers every calendar date in the trip range, including ones with no Day record", async () => {
+    const bundle = await loadTripExportBundle(repo, trip.id);
     const itinerary = buildDayItineraries(bundle);
     expect(itinerary.map((d) => d.date)).toEqual(["2026-04-10", "2026-04-11", "2026-04-12", "2026-04-13"]);
     expect(itinerary[0]?.day).toBeUndefined();
   });
 
-  it("attaches flights to their departure and arrival dates", () => {
-    const bundle = loadTripExportBundle(repo, trip.id);
+  it("attaches flights to their departure and arrival dates", async () => {
+    const bundle = await loadTripExportBundle(repo, trip.id);
     const itinerary = buildDayItineraries(bundle);
     const departureDay = itinerary.find((d) => d.date === "2026-04-10");
     const arrivalDay = itinerary.find((d) => d.date === "2026-04-11");
@@ -60,8 +60,8 @@ describe("buildDayItineraries", () => {
     expect(arrivalDay?.flightsArriving).toHaveLength(1);
   });
 
-  it("attaches stays to their check-in and check-out dates", () => {
-    const bundle = loadTripExportBundle(repo, trip.id);
+  it("attaches stays to their check-in and check-out dates", async () => {
+    const bundle = await loadTripExportBundle(repo, trip.id);
     const itinerary = buildDayItineraries(bundle);
     const checkInDay = itinerary.find((d) => d.date === "2026-04-11");
     const checkOutDay = itinerary.find((d) => d.date === "2026-04-13");
@@ -69,8 +69,8 @@ describe("buildDayItineraries", () => {
     expect(checkOutDay?.staysCheckingOut).toHaveLength(1);
   });
 
-  it("carries the day's blocks through for dates that have a plan", () => {
-    const bundle = loadTripExportBundle(repo, trip.id);
+  it("carries the day's blocks through for dates that have a plan", async () => {
+    const bundle = await loadTripExportBundle(repo, trip.id);
     const itinerary = buildDayItineraries(bundle);
     const planned = itinerary.find((d) => d.date === "2026-04-12");
     expect(planned?.day?.title).toBe("Tokyo");

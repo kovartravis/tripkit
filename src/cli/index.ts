@@ -270,7 +270,7 @@ function runInit(): void {
   console.log(alreadyInitialized ? `Already initialized: ${dir}` : `Initialized Tripkit data directory: ${dir}`);
 }
 
-function runStatus(): void {
+async function runStatus(): Promise<void> {
   const dataDir = resolveDataDir();
   const dbPath = resolveDbPath();
   const dbExists = existsSync(dbPath);
@@ -285,7 +285,7 @@ function runStatus(): void {
 
   const db = openDatabase(dbPath);
   const repo = new SqliteTripkitRepository(db);
-  const trips = repo.listTrips();
+  const trips = await repo.listTrips();
   console.log(`Trips: ${trips.length}`);
   for (const trip of trips) {
     console.log(`  - ${trip.name} (${trip.startDate} → ${trip.endDate}) [${trip.id}]`);
@@ -304,7 +304,7 @@ async function main(): Promise<void> {
       runInit();
       return;
     case "status":
-      runStatus();
+      await runStatus();
       return;
     case "--help":
     case "-h":

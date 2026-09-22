@@ -22,10 +22,10 @@ export function registerPackingTools(server: McpServer, repo: TripkitRepository)
         "By default merges into any existing list (adds missing items, leaves checkoffs alone); set replaceExisting to start over.",
       inputSchema: packingListGenerateInputSchema,
     },
-    safeHandler(({ tripId, climateHints, activityHints, replaceExisting }) => {
-      const trip = repo.getTrip(tripId);
+    safeHandler(async ({ tripId, climateHints, activityHints, replaceExisting }) => {
+      const trip = await repo.getTrip(tripId);
       if (!trip) throw new NotFoundError("trip", tripId);
-      const travelerCount = Math.max(1, repo.listPeople(tripId).length);
+      const travelerCount = Math.max(1, (await repo.listPeople(tripId)).length);
       const generated = generatePackingItems({
         nights: nightsBetween(trip.startDate, trip.endDate),
         travelerCount,
@@ -37,11 +37,11 @@ export function registerPackingTools(server: McpServer, repo: TripkitRepository)
         return repo.replacePackingItems(tripId, generated);
       }
 
-      const existing = repo.listPackingItems(tripId);
+      const existing = await repo.listPackingItems(tripId);
       const existingKeys = new Set(existing.map((item) => `${item.category}::${item.label}`));
       const missing = generated.filter((item) => !existingKeys.has(`${item.category}::${item.label}`));
       if (missing.length > 0) {
-        repo.upsertPackingItems(tripId, missing, []);
+        await repo.upsertPackingItems(tripId, missing, []);
       }
       return repo.listPackingItems(tripId);
     }),

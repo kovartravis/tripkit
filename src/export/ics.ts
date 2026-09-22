@@ -60,8 +60,8 @@ function vevent(fields: {
  * and are emitted in UTC; day-plan block times are local clock times
  * with no offset, so they're emitted as floating time on that day.
  */
-export function exportIcs(repo: TripkitRepository, tripId: string, dayId?: string): string {
-  const bundle = loadTripExportBundle(repo, tripId);
+export async function exportIcs(repo: TripkitRepository, tripId: string, dayId?: string): Promise<string> {
+  const bundle = await loadTripExportBundle(repo, tripId);
   const stamp = toUtcStamp(new Date().toISOString());
   const events: string[] = [];
 

@@ -208,18 +208,18 @@ export async function runHttpServer(repo: TripkitRepository, options: HttpServer
     res.status(401).json({ error: "unauthorized" });
   };
 
-  app.get("/api/trips", requireOwnerSession, (_req, res) => {
-    res.json(repo.listTrips());
+  app.get("/api/trips", requireOwnerSession, async (_req, res) => {
+    res.json(await repo.listTrips());
   });
 
-  app.get("/api/trips/:id/itinerary", requireOwnerSession, (req, res) => {
+  app.get("/api/trips/:id/itinerary", requireOwnerSession, async (req, res) => {
     try {
       const tripId = req.params.id;
       if (typeof tripId !== "string") {
         res.status(400).json({ error: "invalid trip id" });
         return;
       }
-      const bundle = loadTripExportBundle(repo, tripId);
+      const bundle = await loadTripExportBundle(repo, tripId);
       res.json({
         trip: bundle.trip,
         people: bundle.people,
