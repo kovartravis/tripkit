@@ -7,6 +7,7 @@ import { registerStayTools } from "./tools/stay.js";
 import { registerDayTools } from "./tools/day.js";
 import { registerPackingTools } from "./tools/packing.js";
 import { registerTransitTools } from "./tools/transit.js";
+import { registerPlaceTools } from "./tools/place.js";
 import { registerQueryTools } from "./tools/query.js";
 import { registerExportTools } from "./tools/export.js";
 
@@ -26,6 +27,7 @@ export function createTripkitMcpServer(repo: TripkitRepository): McpServer {
   registerDayTools(server, repo);
   registerPackingTools(server, repo);
   registerTransitTools(server);
+  registerPlaceTools(server);
   registerQueryTools(server, repo);
   registerExportTools(server, repo);
 

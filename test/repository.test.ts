@@ -58,6 +58,41 @@ describe("SqliteTripkitRepository", () => {
     expect(await repo.listFlights(trip.id)).toEqual([flight]);
   });
 
+  it("lists flights in true chronological order across differing UTC offsets", async () => {
+    const trip = await repo.createTrip({
+      name: "Multi-leg 2026",
+      startDate: "2026-04-10",
+      endDate: "2026-04-20",
+      homeTimezone: "America/Los_Angeles",
+    });
+
+    // Later by ISO string (starts "...-04-12"), but the -07:00 offset puts it at
+    // 06:30 UTC on the 13th -- chronologically *after* the flight below.
+    const later = await repo.addFlight({
+      tripId: trip.id,
+      airline: "AA",
+      flightNumber: "AA100",
+      departureAirport: "LAX",
+      arrivalAirport: "JFK",
+      departureTime: "2026-04-12T23:30:00-07:00",
+      arrivalTime: "2026-04-13T07:45:00-04:00",
+    });
+    // Earlier by ISO string (starts "...-04-13"), but the -04:00 offset puts it at
+    // 06:00 UTC on the 13th -- chronologically *before* the flight above. A plain
+    // string/localeCompare sort gets these backwards.
+    const earlier = await repo.addFlight({
+      tripId: trip.id,
+      airline: "DL",
+      flightNumber: "DL200",
+      departureAirport: "JFK",
+      arrivalAirport: "LHR",
+      departureTime: "2026-04-13T02:00:00-04:00",
+      arrivalTime: "2026-04-13T13:30:00+01:00",
+    });
+
+    expect((await repo.listFlights(trip.id)).map((f) => f.id)).toEqual([earlier.id, later.id]);
+  });
+
   it("rejects adding a flight to a nonexistent trip", async () => {
     await expect(
       repo.addFlight({
