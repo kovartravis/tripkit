@@ -68,7 +68,7 @@ describe("runHttpServer with Supabase auth", () => {
       host: "127.0.0.1",
       port: TRIPKIT_PORT,
       dataDir,
-      auth: { kind: "supabase", projectUrl: fakeSupabase.baseUrl, publicUrl: new URL(PUBLIC_URL) },
+      auth: { kind: "supabase", projectUrl: fakeSupabase.baseUrl, publicUrl: new URL(PUBLIC_URL), anonKey: "test-anon-key" },
     });
     tripkitBaseUrl = `http://127.0.0.1:${TRIPKIT_PORT}`;
   });

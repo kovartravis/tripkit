@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { initProjectDataDir, resolveDataDir, resolveDbPath } from "../utils/paths.js";
+import { supabasePoolConfigFromEnv } from "../db/postgres/pool.js";
 
 const DEFAULT_HTTP_PORT = 4700;
 
@@ -24,10 +25,11 @@ MCP server flags:
                                    phone or other device on your network can
                                    connect (default: 0.0.0.0:${DEFAULT_HTTP_PORT}).
                                    Also serves a day-by-day itinerary
-                                   dashboard at /ui, always behind an owner
-                                   passphrase regardless of the flags below
-                                   (which only affect /mcp, the agent-facing
-                                   endpoint).
+                                   dashboard at /ui, gated independently of
+                                   whichever flag below controls /mcp: an
+                                   owner passphrase in every mode except
+                                   --supabase-url, where Members sign in via
+                                   Supabase's own hosted login instead.
   tripkit mcp --http --port N     Use a specific port
   tripkit mcp --http --host H     Bind a specific address (default 0.0.0.0)
   tripkit mcp --http --token T    Require "Authorization: Bearer T" on /mcp
@@ -51,6 +53,7 @@ MCP server flags:
                                    auto-generated and printed on first run if
                                    omitted).
   tripkit mcp --http --supabase-url URL \
+    --supabase-anon-key KEY \
     --public-url URL              Verify /mcp bearer tokens against a
                                    Supabase project's own OAuth 2.1 server
                                    instead of Tripkit's — clients register
@@ -59,9 +62,18 @@ MCP server flags:
                                    Tripkit only checks the tokens they bring
                                    back. --supabase-url is the project's base
                                    URL (e.g. https://<ref>.supabase.co);
-                                   --public-url is (as with --oauth) the
-                                   public HTTPS origin clients reach this
-                                   server at.
+                                   --supabase-anon-key is that project's
+                                   public anon key (safe to expose — it's
+                                   embedded in the /ui dashboard so a Member
+                                   can sign in there via Supabase's own
+                                   hosted login); --public-url is (as with
+                                   --oauth) the public HTTPS origin clients
+                                   reach this server at. /ui and /api/*
+                                   authenticate Members via Supabase in this
+                                   mode too, not an owner passphrase — set
+                                   SUPABASE_DB_HOST/USER/PASSWORD (see
+                                   README) so the dashboard can reach
+                                   Postgres directly.
 
 Data resolution: a ./.tripkit directory in the current folder (created by
 "tripkit init") is used if present; otherwise Tripkit falls back to a
@@ -77,6 +89,7 @@ function parseMcpArgs(args: string[]): {
   publicUrl: string | undefined;
   oauthPassword: string | undefined;
   supabaseUrl: string | undefined;
+  supabaseAnonKey: string | undefined;
 } {
   let http = false;
   let port = DEFAULT_HTTP_PORT;
@@ -87,6 +100,7 @@ function parseMcpArgs(args: string[]): {
   let publicUrl: string | undefined;
   let oauthPassword: string | undefined = process.env.TRIPKIT_OAUTH_PASSWORD;
   let supabaseUrl: string | undefined = process.env.TRIPKIT_SUPABASE_URL;
+  let supabaseAnonKey: string | undefined = process.env.TRIPKIT_SUPABASE_ANON_KEY;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -118,6 +132,9 @@ function parseMcpArgs(args: string[]): {
       case "--supabase-url":
         supabaseUrl = args[++i];
         break;
+      case "--supabase-anon-key":
+        supabaseAnonKey = args[++i];
+        break;
       default:
         console.error(`Unknown flag: ${arg}\n`);
         console.log(USAGE);
@@ -141,8 +158,13 @@ function parseMcpArgs(args: string[]): {
     console.log(USAGE);
     process.exit(1);
   }
+  if (supabase && !supabaseAnonKey) {
+    console.error("--supabase-url requires --supabase-anon-key <key>\n");
+    console.log(USAGE);
+    process.exit(1);
+  }
 
-  return { http, port, host, token, noAuth, oauth, publicUrl, oauthPassword, supabaseUrl };
+  return { http, port, host, token, noAuth, oauth, publicUrl, oauthPassword, supabaseUrl, supabaseAnonKey };
 }
 
 async function runMcpStdio(): Promise<void> {
@@ -198,7 +220,16 @@ async function runMcpHttp(opts: ReturnType<typeof parseMcpArgs>): Promise<void> 
       console.error(`Invalid --supabase-url: ${opts.supabaseUrl}`);
       process.exit(1);
     }
-    auth = { kind: "supabase", projectUrl, publicUrl };
+    // The dashboard (/ui, /api/*) connects to Postgres directly in this mode — fail before
+    // binding a port rather than letting the first browser visit hit a missing-config error.
+    if (!supabasePoolConfigFromEnv()) {
+      console.error(
+        "--supabase-url also requires SUPABASE_DB_HOST, SUPABASE_DB_USER, and SUPABASE_DB_PASSWORD " +
+          "to be set (the dashboard's Postgres connection) — see README.\n",
+      );
+      process.exit(1);
+    }
+    auth = { kind: "supabase", projectUrl, publicUrl, anonKey: opts.supabaseAnonKey! };
   } else if (opts.noAuth) {
     auth = { kind: "none" };
   } else {
@@ -225,7 +256,9 @@ async function runMcpHttp(opts: ReturnType<typeof parseMcpArgs>): Promise<void> 
   }
 
   console.log(`\nDashboard: http://${opts.host}:${opts.port}/ui (day-by-day itinerary view)`);
-  if (generatedOwnerPassword) {
+  if (auth.kind === "supabase") {
+    console.log("Sign in there with your Supabase Account (Supabase's own hosted login) — no owner passphrase in this mode.");
+  } else if (generatedOwnerPassword) {
     console.log(`Owner passphrase (for /ui, and /authorize if using --oauth):`);
     console.log(`  ${generatedOwnerPassword}`);
     console.log(`(Saved as a hash under ${dataDir}; re-run with --oauth-password to change it.)`);

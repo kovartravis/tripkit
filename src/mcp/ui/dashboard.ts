@@ -1,10 +1,25 @@
+export interface DashboardPageOptions {
+  /**
+   * Present only in `auth.kind === "supabase"` mode: the dashboard signs in via Supabase's own
+   * hosted login (client-side, using this project's public anon key — safe to embed, per
+   * Supabase's own design) instead of the owner-passphrase cookie flow. Absent in every other
+   * auth mode, which keeps rendering exactly what it always has.
+   */
+  supabase?: { url: string; anonKey: string };
+}
+
 /**
  * Read-only day-by-day itinerary dashboard. A single static HTML document
  * (Tailwind via CDN, vanilla JS) that renders whatever /api/trips and
  * /api/trips/:id/itinerary return — no build step, matching the rest of
  * this local-first tool.
  */
-export function renderDashboardPage(): string {
+export function renderDashboardPage(opts: DashboardPageOptions = {}): string {
+  const supabaseConfig = opts.supabase;
+  // Server-controlled values only (a CLI flag / env var, not user input), but escape `</` all
+  // the same so nothing here can prematurely close this inline <script> tag.
+  const supabaseConfigJson = supabaseConfig ? JSON.stringify(supabaseConfig).replace(/<\//g, "<\\/") : "null";
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -16,7 +31,9 @@ export function renderDashboardPage(): string {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
+${supabaseConfig ? '<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>' : ""}
 <script>
+  window.__TRIPKIT_SUPABASE__ = ${supabaseConfigJson};
   tailwind.config = {
     theme: {
       extend: {
@@ -50,6 +67,17 @@ export function renderDashboardPage(): string {
 
   <main class="mx-auto max-w-3xl px-4 sm:px-6 py-8">
     <div id="status" class="text-sm text-neutral-500"></div>
+    <div id="login" class="hidden max-w-sm mx-auto mt-16">
+      <h2 class="text-lg font-semibold mb-4 text-center text-neutral-100">Sign in to Tripkit</h2>
+      <form id="loginForm" class="space-y-3">
+        <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" required
+          class="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
+        <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" required
+          class="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
+        <button type="submit" class="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-2 text-sm font-medium text-white">Sign in</button>
+        <p id="loginError" class="hidden text-sm text-red-400"></p>
+      </form>
+    </div>
     <div id="app" class="hidden">
       <section class="mb-10">
         <div class="flex items-baseline justify-between flex-wrap gap-x-4 gap-y-1">
@@ -150,9 +178,34 @@ export function renderDashboardPage(): string {
     return fmt12h(match[1], match[2]);
   }
 
+  var supabaseConfig = window.__TRIPKIT_SUPABASE__;
+  var supabaseClient = supabaseConfig && window.supabase
+    ? window.supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey)
+    : null;
+
+  function showLogin() {
+    document.getElementById('status').classList.add('hidden');
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('login').classList.remove('hidden');
+  }
+  function hideLogin() {
+    document.getElementById('login').classList.add('hidden');
+  }
+
   async function api(path) {
-    const res = await fetch(path, { credentials: 'include' });
-    if (res.status === 401) { window.location.reload(); throw new Error('unauthorized'); }
+    const headers = {};
+    if (supabaseClient) {
+      const { data } = await supabaseClient.auth.getSession();
+      const token = data && data.session && data.session.access_token;
+      if (!token) { showLogin(); throw new Error('unauthorized'); }
+      headers['Authorization'] = 'Bearer ' + token;
+    }
+    const res = await fetch(path, { credentials: 'include', headers });
+    if (res.status === 401) {
+      if (supabaseClient) { await supabaseClient.auth.signOut(); showLogin(); }
+      else { window.location.reload(); }
+      throw new Error('unauthorized');
+    }
     if (!res.ok) throw new Error('Request failed: ' + res.status);
     return res.json();
   }
@@ -330,7 +383,14 @@ export function renderDashboardPage(): string {
   }
 
   async function init() {
+    if (supabaseClient) {
+      const { data } = await supabaseClient.auth.getSession();
+      if (!data || !data.session) { showLogin(); return; }
+    }
+    hideLogin();
+
     const status = document.getElementById('status');
+    status.classList.remove('hidden');
     try {
       const trips = await api('/api/trips');
       if (!trips.length) {
@@ -345,8 +405,26 @@ export function renderDashboardPage(): string {
 
       await loadTrip(trips[0].id);
     } catch (err) {
+      if (err && err.message === 'unauthorized') return;
       status.textContent = 'Could not load trips: ' + (err && err.message ? err.message : err);
     }
+  }
+
+  if (supabaseClient) {
+    document.getElementById('loginForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const email = document.getElementById('loginEmail').value;
+      const password = document.getElementById('loginPassword').value;
+      const errorEl = document.getElementById('loginError');
+      errorEl.classList.add('hidden');
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) {
+        errorEl.textContent = error.message;
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      init();
+    });
   }
 
   init();
