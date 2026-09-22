@@ -42,39 +42,43 @@ export interface QueryResult {
 }
 
 /**
- * Storage port. v1 ships a SQLite-backed implementation
- * (`SqliteTripkitRepository`) for local-first use; a hosted backend can
- * implement this same interface later without touching MCP tool code.
+ * Storage port. v1 shipped a SQLite-backed implementation
+ * (`SqliteTripkitRepository`) for local-first use; `SupabaseTripkitRepository` implements the
+ * same interface against Postgres/RLS. Every data-access method is async because RLS
+ * enforcement requires a real network round trip per call (see
+ * `SupabaseTripkitRepository.withAuth`) — `SqliteTripkitRepository`'s methods are still
+ * synchronous under the hood but satisfy this interface trivially since an `async` method
+ * whose body has nothing to await still returns a `Promise` that resolves on the same tick.
  */
 export interface TripkitRepository {
-  createTrip(input: TripCreateInput): Trip;
-  updateTrip(input: TripUpdateInput): Trip;
-  getTrip(id: string): Trip | undefined;
-  listTrips(): Trip[];
+  createTrip(input: TripCreateInput): Promise<Trip>;
+  updateTrip(input: TripUpdateInput): Promise<Trip>;
+  getTrip(id: string): Promise<Trip | undefined>;
+  listTrips(): Promise<Trip[]>;
 
-  addPerson(input: PersonAddInput): Person;
-  updatePerson(input: PersonUpdateInput): Person;
-  listPeople(tripId: string): Person[];
+  addPerson(input: PersonAddInput): Promise<Person>;
+  updatePerson(input: PersonUpdateInput): Promise<Person>;
+  listPeople(tripId: string): Promise<Person[]>;
 
-  addFlight(input: FlightAddInput): Flight;
-  updateFlight(input: FlightUpdateInput): Flight;
-  listFlights(tripId: string): Flight[];
+  addFlight(input: FlightAddInput): Promise<Flight>;
+  updateFlight(input: FlightUpdateInput): Promise<Flight>;
+  listFlights(tripId: string): Promise<Flight[]>;
 
-  addStay(input: StayAddInput): Stay;
-  updateStay(input: StayUpdateInput): Stay;
-  listStays(tripId: string): Stay[];
+  addStay(input: StayAddInput): Promise<Stay>;
+  updateStay(input: StayUpdateInput): Promise<Stay>;
+  listStays(tripId: string): Promise<Stay[]>;
 
-  upsertDay(input: DayUpsertInput): Day;
-  getDay(id: string): Day | undefined;
-  getDayByDate(tripId: string, date: string): Day | undefined;
-  listDays(tripId: string, range?: { startDate?: string; endDate?: string }): Day[];
-  setDayPlan(dayId: string, blocks: DayBlockInput[]): Day;
+  upsertDay(input: DayUpsertInput): Promise<Day>;
+  getDay(id: string): Promise<Day | undefined>;
+  getDayByDate(tripId: string, date: string): Promise<Day | undefined>;
+  listDays(tripId: string, range?: { startDate?: string; endDate?: string }): Promise<Day[]>;
+  setDayPlan(dayId: string, blocks: DayBlockInput[]): Promise<Day>;
 
-  listPackingItems(tripId: string): PackingItem[];
+  listPackingItems(tripId: string): Promise<PackingItem[]>;
   replacePackingItems(
     tripId: string,
     items: Array<{ category: string; label: string; quantity: number }>,
-  ): PackingItem[];
+  ): Promise<PackingItem[]>;
   upsertPackingItems(
     tripId: string,
     upserts: Array<{
@@ -86,9 +90,9 @@ export interface TripkitRepository {
       notes?: string;
     }>,
     removeIds: string[],
-  ): PackingItem[];
+  ): Promise<PackingItem[]>;
 
-  query(tripId: string, filters: QueryFilters): QueryResult;
+  query(tripId: string, filters: QueryFilters): Promise<QueryResult>;
 
   close(): void;
 }

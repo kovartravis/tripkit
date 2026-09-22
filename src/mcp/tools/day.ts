@@ -55,8 +55,8 @@ export function registerDayTools(server: McpServer, repo: TripkitRepository): vo
       description: "Fetch a single day (with its plan) by id, or by tripId + date.",
       inputSchema: dayGetInputSchema,
     },
-    safeHandler(({ id, tripId, date }) => {
-      const day = id ? repo.getDay(id) : repo.getDayByDate(tripId!, date!);
+    safeHandler(async ({ id, tripId, date }) => {
+      const day = id ? await repo.getDay(id) : await repo.getDayByDate(tripId!, date!);
       if (!day) throw new NotFoundError("day", id ?? `${tripId}/${date}`);
       return day;
     }),

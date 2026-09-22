@@ -19,7 +19,7 @@ export function registerExportTools(server: McpServer, repo: TripkitRepository):
       description: "Export a trip (or a single day within it, via dayId) as markdown.",
       inputSchema: exportInputSchema,
     },
-    safeHandler(({ tripId, dayId }) => ({ markdown: exportMarkdown(repo, tripId, dayId) })),
+    safeHandler(async ({ tripId, dayId }) => ({ markdown: await exportMarkdown(repo, tripId, dayId) })),
   );
 
   server.registerTool(
@@ -30,6 +30,6 @@ export function registerExportTools(server: McpServer, repo: TripkitRepository):
         "Export flights, stays, and day-plan blocks as an ICS calendar. Scope to a single day's blocks via dayId.",
       inputSchema: exportInputSchema,
     },
-    safeHandler(({ tripId, dayId }) => ({ ics: exportIcs(repo, tripId, dayId) })),
+    safeHandler(async ({ tripId, dayId }) => ({ ics: await exportIcs(repo, tripId, dayId) })),
   );
 }

@@ -33,8 +33,8 @@ export function registerTripTools(server: McpServer, repo: TripkitRepository): v
       description: "Fetch a single trip by id.",
       inputSchema: z.object({ id: idSchema }),
     },
-    safeHandler(({ id }) => {
-      const trip = repo.getTrip(id);
+    safeHandler(async ({ id }) => {
+      const trip = await repo.getTrip(id);
       if (!trip) throw new NotFoundError("trip", id);
       return trip;
     }),

@@ -11,17 +11,17 @@ export interface TripExportBundle {
   packingItems: PackingItem[];
 }
 
-export function loadTripExportBundle(repo: TripkitRepository, tripId: string): TripExportBundle {
-  const trip = repo.getTrip(tripId);
+export async function loadTripExportBundle(repo: TripkitRepository, tripId: string): Promise<TripExportBundle> {
+  const trip = await repo.getTrip(tripId);
   if (!trip) throw new NotFoundError("trip", tripId);
-  return {
-    trip,
-    people: repo.listPeople(tripId),
-    flights: repo.listFlights(tripId),
-    stays: repo.listStays(tripId),
-    days: repo.listDays(tripId),
-    packingItems: repo.listPackingItems(tripId),
-  };
+  const [people, flights, stays, days, packingItems] = await Promise.all([
+    repo.listPeople(tripId),
+    repo.listFlights(tripId),
+    repo.listStays(tripId),
+    repo.listDays(tripId),
+    repo.listPackingItems(tripId),
+  ]);
+  return { trip, people, flights, stays, days, packingItems };
 }
 
 function heading(text: string, level = 2): string {
@@ -141,8 +141,8 @@ export function renderTripMarkdown(bundle: TripExportBundle): string {
  * Exports either the whole trip, or a single day within it when `dayId`
  * is provided.
  */
-export function exportMarkdown(repo: TripkitRepository, tripId: string, dayId?: string): string {
-  const bundle = loadTripExportBundle(repo, tripId);
+export async function exportMarkdown(repo: TripkitRepository, tripId: string, dayId?: string): Promise<string> {
+  const bundle = await loadTripExportBundle(repo, tripId);
   if (!dayId) return renderTripMarkdown(bundle);
 
   const day = bundle.days.find((d) => d.id === dayId);

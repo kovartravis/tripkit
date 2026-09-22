@@ -20,6 +20,7 @@ import type {
   TripUpdateInput,
 } from "../domain/types.js";
 import { newId, nowIso } from "../utils/id.js";
+import { n } from "../utils/normalize.js";
 import { NotFoundError, type QueryFilters, type QueryResult, type TripkitRepository } from "./repository.js";
 
 /** SQLite row shapes (snake_case, as stored) */
@@ -199,11 +200,6 @@ function toPackingItem(row: PackingItemRow): PackingItem {
   };
 }
 
-/** node:sqlite bind params reject `undefined`; normalize to `null`. */
-function n(value: string | undefined | null): string | null {
-  return value ?? null;
-}
-
 export class SqliteTripkitRepository implements TripkitRepository {
   constructor(private readonly db: DatabaseSync) {}
 
@@ -213,7 +209,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
 
   // ---------------------------------------------------------------- trips
 
-  createTrip(input: TripCreateInput): Trip {
+  async createTrip(input: TripCreateInput): Promise<Trip> {
     const id = newId("trip");
     const ts = nowIso();
     this.db
@@ -225,7 +221,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
     return this.getTripOrThrow(id);
   }
 
-  updateTrip(input: TripUpdateInput): Trip {
+  async updateTrip(input: TripUpdateInput): Promise<Trip> {
     const existing = this.getTripOrThrow(input.id);
     const merged: Trip = {
       ...existing,
@@ -253,25 +249,29 @@ export class SqliteTripkitRepository implements TripkitRepository {
     return merged;
   }
 
-  getTrip(id: string): Trip | undefined {
-    const row = this.db.prepare(`SELECT * FROM trips WHERE id = ?`).get(id) as TripRow | undefined;
+  async getTrip(id: string): Promise<Trip | undefined> {
+    const row = this.selectTripRow(id);
     return row ? toTrip(row) : undefined;
   }
 
-  private getTripOrThrow(id: string): Trip {
-    const trip = this.getTrip(id);
-    if (!trip) throw new NotFoundError("trip", id);
-    return trip;
+  private selectTripRow(id: string): TripRow | undefined {
+    return this.db.prepare(`SELECT * FROM trips WHERE id = ?`).get(id) as TripRow | undefined;
   }
 
-  listTrips(): Trip[] {
+  private getTripOrThrow(id: string): Trip {
+    const row = this.selectTripRow(id);
+    if (!row) throw new NotFoundError("trip", id);
+    return toTrip(row);
+  }
+
+  async listTrips(): Promise<Trip[]> {
     const rows = this.db.prepare(`SELECT * FROM trips ORDER BY start_date ASC`).all() as unknown as TripRow[];
     return rows.map(toTrip);
   }
 
   // --------------------------------------------------------------- people
 
-  addPerson(input: PersonAddInput): Person {
+  async addPerson(input: PersonAddInput): Promise<Person> {
     this.getTripOrThrow(input.tripId);
     const id = newId("person");
     const ts = nowIso();
@@ -284,7 +284,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
     return this.getPersonOrThrow(id);
   }
 
-  updatePerson(input: PersonUpdateInput): Person {
+  async updatePerson(input: PersonUpdateInput): Promise<Person> {
     const existing = this.getPersonOrThrow(input.id);
     const merged: Person = {
       ...existing,
@@ -306,7 +306,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
     return toPerson(row);
   }
 
-  listPeople(tripId: string): Person[] {
+  async listPeople(tripId: string): Promise<Person[]> {
     const rows = this.db
       .prepare(`SELECT * FROM people WHERE trip_id = ? ORDER BY created_at ASC`)
       .all(tripId) as unknown as PersonRow[];
@@ -315,7 +315,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
 
   // -------------------------------------------------------------- flights
 
-  addFlight(input: FlightAddInput): Flight {
+  async addFlight(input: FlightAddInput): Promise<Flight> {
     this.getTripOrThrow(input.tripId);
     const id = newId("flight");
     const ts = nowIso();
@@ -344,7 +344,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
     return this.getFlightOrThrow(id);
   }
 
-  updateFlight(input: FlightUpdateInput): Flight {
+  async updateFlight(input: FlightUpdateInput): Promise<Flight> {
     const existing = this.getFlightOrThrow(input.id);
     const merged: Flight = {
       ...existing,
@@ -390,7 +390,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
     return toFlight(row);
   }
 
-  listFlights(tripId: string): Flight[] {
+  async listFlights(tripId: string): Promise<Flight[]> {
     const rows = this.db
       .prepare(`SELECT * FROM flights WHERE trip_id = ? ORDER BY departure_time ASC`)
       .all(tripId) as unknown as FlightRow[];
@@ -399,7 +399,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
 
   // ---------------------------------------------------------------- stays
 
-  addStay(input: StayAddInput): Stay {
+  async addStay(input: StayAddInput): Promise<Stay> {
     this.getTripOrThrow(input.tripId);
     const id = newId("stay");
     const ts = nowIso();
@@ -425,7 +425,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
     return this.getStayOrThrow(id);
   }
 
-  updateStay(input: StayUpdateInput): Stay {
+  async updateStay(input: StayUpdateInput): Promise<Stay> {
     const existing = this.getStayOrThrow(input.id);
     const merged: Stay = {
       ...existing,
@@ -464,7 +464,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
     return toStay(row);
   }
 
-  listStays(tripId: string): Stay[] {
+  async listStays(tripId: string): Promise<Stay[]> {
     const rows = this.db
       .prepare(`SELECT * FROM stays WHERE trip_id = ? ORDER BY check_in ASC`)
       .all(tripId) as unknown as StayRow[];
@@ -473,7 +473,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
 
   // ----------------------------------------------------------------- days
 
-  upsertDay(input: DayUpsertInput): Day {
+  async upsertDay(input: DayUpsertInput): Promise<Day> {
     this.getTripOrThrow(input.tripId);
     const existingRow = this.db
       .prepare(`SELECT * FROM days WHERE trip_id = ? AND date = ?`)
@@ -499,26 +499,29 @@ export class SqliteTripkitRepository implements TripkitRepository {
     return this.getDayOrThrow(id);
   }
 
-  getDay(id: string): Day | undefined {
-    const row = this.db.prepare(`SELECT * FROM days WHERE id = ?`).get(id) as DayRow | undefined;
-    if (!row) return undefined;
-    return this.hydrateDay(row);
+  async getDay(id: string): Promise<Day | undefined> {
+    const row = this.selectDayRow(id);
+    return row ? this.hydrateDay(row) : undefined;
+  }
+
+  private selectDayRow(id: string): DayRow | undefined {
+    return this.db.prepare(`SELECT * FROM days WHERE id = ?`).get(id) as DayRow | undefined;
   }
 
   private getDayOrThrow(id: string): Day {
-    const day = this.getDay(id);
-    if (!day) throw new NotFoundError("day", id);
-    return day;
+    const row = this.selectDayRow(id);
+    if (!row) throw new NotFoundError("day", id);
+    return this.hydrateDay(row);
   }
 
-  getDayByDate(tripId: string, date: string): Day | undefined {
+  async getDayByDate(tripId: string, date: string): Promise<Day | undefined> {
     const row = this.db
       .prepare(`SELECT * FROM days WHERE trip_id = ? AND date = ?`)
       .get(tripId, date) as DayRow | undefined;
     return row ? this.hydrateDay(row) : undefined;
   }
 
-  listDays(tripId: string, range?: { startDate?: string; endDate?: string }): Day[] {
+  async listDays(tripId: string, range?: { startDate?: string; endDate?: string }): Promise<Day[]> {
     const rows = this.db
       .prepare(`SELECT * FROM days WHERE trip_id = ? ORDER BY date ASC`)
       .all(tripId) as unknown as DayRow[];
@@ -546,7 +549,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
     };
   }
 
-  setDayPlan(dayId: string, blocks: DayBlockInput[]): Day {
+  async setDayPlan(dayId: string, blocks: DayBlockInput[]): Promise<Day> {
     this.getDayOrThrow(dayId);
     assertNoOverlaps(blocks);
 
@@ -578,17 +581,17 @@ export class SqliteTripkitRepository implements TripkitRepository {
 
   // ------------------------------------------------------------- packing
 
-  listPackingItems(tripId: string): PackingItem[] {
+  async listPackingItems(tripId: string): Promise<PackingItem[]> {
     const rows = this.db
       .prepare(`SELECT * FROM packing_items WHERE trip_id = ? ORDER BY category ASC, label ASC`)
       .all(tripId) as unknown as PackingItemRow[];
     return rows.map(toPackingItem);
   }
 
-  replacePackingItems(
+  async replacePackingItems(
     tripId: string,
     items: Array<{ category: string; label: string; quantity: number }>,
-  ): PackingItem[] {
+  ): Promise<PackingItem[]> {
     this.getTripOrThrow(tripId);
     const ts = nowIso();
     this.db.prepare(`DELETE FROM packing_items WHERE trip_id = ?`).run(tripId);
@@ -602,7 +605,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
     return this.listPackingItems(tripId);
   }
 
-  upsertPackingItems(
+  async upsertPackingItems(
     tripId: string,
     upserts: Array<{
       id?: string;
@@ -613,7 +616,7 @@ export class SqliteTripkitRepository implements TripkitRepository {
       notes?: string;
     }>,
     removeIds: string[],
-  ): PackingItem[] {
+  ): Promise<PackingItem[]> {
     this.getTripOrThrow(tripId);
     const ts = nowIso();
 
@@ -668,36 +671,36 @@ export class SqliteTripkitRepository implements TripkitRepository {
 
   // ----------------------------------------------------------------- query
 
-  query(tripId: string, filters: QueryFilters): QueryResult {
+  async query(tripId: string, filters: QueryFilters): Promise<QueryResult> {
     const result: QueryResult = {};
     const types = new Set(filters.entityTypes);
 
     if (types.has("trip")) {
-      result.trip = this.getTrip(tripId);
+      result.trip = await this.getTrip(tripId);
     }
     if (types.has("person")) {
-      const people = this.listPeople(tripId);
+      const people = await this.listPeople(tripId);
       result.people = filters.personId ? people.filter((p) => p.id === filters.personId) : people;
     }
     if (types.has("flight")) {
-      let flights = this.listFlights(tripId);
+      let flights = await this.listFlights(tripId);
       if (filters.startDate) flights = flights.filter((f) => f.departureTime.slice(0, 10) >= filters.startDate!);
       if (filters.endDate) flights = flights.filter((f) => f.departureTime.slice(0, 10) <= filters.endDate!);
       if (filters.personId) flights = flights.filter((f) => f.travelerIds.includes(filters.personId!));
       result.flights = flights;
     }
     if (types.has("stay")) {
-      let stays = this.listStays(tripId);
+      let stays = await this.listStays(tripId);
       if (filters.startDate) stays = stays.filter((s) => s.checkOut.slice(0, 10) >= filters.startDate!);
       if (filters.endDate) stays = stays.filter((s) => s.checkIn.slice(0, 10) <= filters.endDate!);
       if (filters.personId) stays = stays.filter((s) => s.guestIds.includes(filters.personId!));
       result.stays = stays;
     }
     if (types.has("day")) {
-      result.days = this.listDays(tripId, { startDate: filters.startDate, endDate: filters.endDate });
+      result.days = await this.listDays(tripId, { startDate: filters.startDate, endDate: filters.endDate });
     }
     if (types.has("packingItem")) {
-      result.packingItems = this.listPackingItems(tripId);
+      result.packingItems = await this.listPackingItems(tripId);
     }
 
     return result;
