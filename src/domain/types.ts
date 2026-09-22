@@ -345,6 +345,24 @@ export const transitSketchSchema = z.object({
 export type TransitSketch = z.infer<typeof transitSketchSchema>;
 
 /**
+ * Place lookup (geocoding, not persisted)
+ */
+export const placeLookupInputSchema = z.object({
+  query: z.string().min(1),
+  limit: z.number().int().min(1).max(5).optional(),
+});
+export type PlaceLookupInput = z.infer<typeof placeLookupInputSchema>;
+
+export const placeCandidateSchema = z.object({
+  displayName: z.string(),
+  address: z.string(),
+  lat: z.number(),
+  lon: z.number(),
+  mapsUrl: z.string(),
+});
+export type PlaceCandidate = z.infer<typeof placeCandidateSchema>;
+
+/**
  * Query
  */
 export const queryEntityTypeSchema = z.enum([
