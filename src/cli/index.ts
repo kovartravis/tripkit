@@ -50,6 +50,18 @@ MCP server flags:
                                    /ui and (with --oauth) /authorize (one is
                                    auto-generated and printed on first run if
                                    omitted).
+  tripkit mcp --http --supabase-url URL \
+    --public-url URL              Verify /mcp bearer tokens against a
+                                   Supabase project's own OAuth 2.1 server
+                                   instead of Tripkit's — clients register
+                                   and authenticate directly with Supabase
+                                   (dynamic client registration, PKCE), and
+                                   Tripkit only checks the tokens they bring
+                                   back. --supabase-url is the project's base
+                                   URL (e.g. https://<ref>.supabase.co);
+                                   --public-url is (as with --oauth) the
+                                   public HTTPS origin clients reach this
+                                   server at.
 
 Data resolution: a ./.tripkit directory in the current folder (created by
 "tripkit init") is used if present; otherwise Tripkit falls back to a
@@ -64,6 +76,7 @@ function parseMcpArgs(args: string[]): {
   oauth: boolean;
   publicUrl: string | undefined;
   oauthPassword: string | undefined;
+  supabaseUrl: string | undefined;
 } {
   let http = false;
   let port = DEFAULT_HTTP_PORT;
@@ -73,6 +86,7 @@ function parseMcpArgs(args: string[]): {
   let oauth = false;
   let publicUrl: string | undefined;
   let oauthPassword: string | undefined = process.env.TRIPKIT_OAUTH_PASSWORD;
+  let supabaseUrl: string | undefined = process.env.TRIPKIT_SUPABASE_URL;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -101,6 +115,9 @@ function parseMcpArgs(args: string[]): {
       case "--oauth-password":
         oauthPassword = args[++i];
         break;
+      case "--supabase-url":
+        supabaseUrl = args[++i];
+        break;
       default:
         console.error(`Unknown flag: ${arg}\n`);
         console.log(USAGE);
@@ -108,8 +125,9 @@ function parseMcpArgs(args: string[]): {
     }
   }
 
-  if ([noAuth, oauth, token !== undefined].filter(Boolean).length > 1) {
-    console.error("--token, --no-auth, and --oauth are mutually exclusive\n");
+  const supabase = supabaseUrl !== undefined;
+  if ([noAuth, oauth, supabase, token !== undefined].filter(Boolean).length > 1) {
+    console.error("--token, --no-auth, --oauth, and --supabase-url are mutually exclusive\n");
     console.log(USAGE);
     process.exit(1);
   }
@@ -118,8 +136,13 @@ function parseMcpArgs(args: string[]): {
     console.log(USAGE);
     process.exit(1);
   }
+  if (supabase && !publicUrl) {
+    console.error("--supabase-url requires --public-url <https-url>\n");
+    console.log(USAGE);
+    process.exit(1);
+  }
 
-  return { http, port, host, token, noAuth, oauth, publicUrl, oauthPassword };
+  return { http, port, host, token, noAuth, oauth, publicUrl, oauthPassword, supabaseUrl };
 }
 
 async function runMcpStdio(): Promise<void> {
@@ -160,6 +183,22 @@ async function runMcpHttp(opts: ReturnType<typeof parseMcpArgs>): Promise<void> 
       process.exit(1);
     }
     auth = { kind: "oauth", publicUrl };
+  } else if (opts.supabaseUrl !== undefined) {
+    let publicUrl: URL;
+    let projectUrl: URL;
+    try {
+      publicUrl = new URL(opts.publicUrl!);
+    } catch {
+      console.error(`Invalid --public-url: ${opts.publicUrl}`);
+      process.exit(1);
+    }
+    try {
+      projectUrl = new URL(opts.supabaseUrl);
+    } catch {
+      console.error(`Invalid --supabase-url: ${opts.supabaseUrl}`);
+      process.exit(1);
+    }
+    auth = { kind: "supabase", projectUrl, publicUrl };
   } else if (opts.noAuth) {
     auth = { kind: "none" };
   } else {
@@ -179,6 +218,8 @@ async function runMcpHttp(opts: ReturnType<typeof parseMcpArgs>): Promise<void> 
     console.log(`Authorization required: Bearer ${auth.token}`);
   } else if (auth.kind === "none") {
     console.log("Warning: running with --no-auth — anyone on your network can read and write this trip data.");
+  } else if (auth.kind === "supabase") {
+    console.log(`Supabase auth enabled (project: ${auth.projectUrl}). MCP endpoint: ${new URL("/mcp", auth.publicUrl)}`);
   } else {
     console.log(`OAuth enabled. MCP endpoint: ${new URL("/mcp", auth.publicUrl)}`);
   }

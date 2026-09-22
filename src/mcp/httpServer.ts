@@ -1,9 +1,14 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import { networkInterfaces } from "node:os";
 import { timingSafeEqual } from "node:crypto";
+import { createRemoteJWKSet } from "jose";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import {
+  mcpAuthRouter,
+  mcpAuthMetadataRouter,
+  getOAuthProtectedResourceMetadataUrl,
+} from "@modelcontextprotocol/sdk/server/auth/router.js";
 import type { TripkitRepository } from "../db/repository.js";
 import { NotFoundError } from "../db/repository.js";
 import { createTripkitMcpServer } from "./server.js";
@@ -17,13 +22,19 @@ import {
   verifySessionToken,
 } from "./oauth/loginGate.js";
 import { loadOAuthState, verifyOwnerPassword, type OAuthState } from "./oauth/state.js";
+import { fetchSupabaseOAuthMetadata } from "./oauth/supabaseMetadata.js";
+import { createSupabaseTokenVerifier } from "./oauth/supabaseTokenVerifier.js";
 import { renderDashboardPage } from "./ui/dashboard.js";
 import { buildDayItineraries } from "./ui/itinerary.js";
 import { loadTripExportBundle } from "../export/markdown.js";
 
 const MCP_PATH = "/mcp";
 
-export type AuthMode = { kind: "bearer"; token: string } | { kind: "oauth"; publicUrl: URL } | { kind: "none" };
+export type AuthMode =
+  | { kind: "bearer"; token: string }
+  | { kind: "oauth"; publicUrl: URL }
+  | { kind: "supabase"; projectUrl: URL; publicUrl: URL }
+  | { kind: "none" };
 
 export interface HttpServerOptions {
   host: string;
@@ -32,6 +43,8 @@ export interface HttpServerOptions {
   auth: AuthMode;
   /** Owner passphrase gating /ui, /api, and (in OAuth mode) /authorize. Auto-generated on first run if omitted. */
   ownerPassword?: string;
+  /** Override for fetching Supabase's OAuth discovery document (`auth.kind === "supabase"`); defaults to `fetch`. */
+  fetchImpl?: typeof fetch;
 }
 
 export interface HttpServerHandle {
@@ -126,6 +139,39 @@ export async function runHttpServer(repo: TripkitRepository, options: HttpServer
     );
 
     app.post(MCP_PATH, requireBearerAuth({ verifier: provider, resourceMetadataUrl }), (req, res) => {
+      void handleMcpRequest(repo, req, res);
+    });
+  } else if (auth.kind === "supabase") {
+    // Tripkit is only the resource server here: Supabase's own OAuth 2.1 server issues and
+    // signs the tokens, so all we do is advertise where clients should authenticate (this
+    // Protected Resource Metadata) and verify what they bring back (the bearer middleware
+    // below) — no /authorize or /token routes of our own.
+    const loaded = loadOAuthState(options.dataDir, options.ownerPassword);
+    ownerState = loaded.state;
+    generatedOwnerPassword = loaded.generatedPassword;
+
+    const oauthMetadata = await fetchSupabaseOAuthMetadata(auth.projectUrl, options.fetchImpl);
+    const verifier = createSupabaseTokenVerifier({
+      issuer: oauthMetadata.issuer,
+      getKey: createRemoteJWKSet(new URL(oauthMetadata.jwks_uri)),
+    });
+
+    const resourceUrl = new URL(MCP_PATH, auth.publicUrl);
+    const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(resourceUrl);
+
+    app.use(
+      mcpAuthMetadataRouter({
+        oauthMetadata,
+        resourceServerUrl: resourceUrl,
+        // Supabase's OAuth server only grants its own fixed OIDC scopes (openid, email,
+        // profile, ...), not app-defined ones — advertise what it actually supports rather
+        // than a made-up scope no client could ever obtain.
+        scopesSupported: oauthMetadata.scopes_supported,
+        resourceName: "Tripkit",
+      }),
+    );
+
+    app.post(MCP_PATH, requireBearerAuth({ verifier, resourceMetadataUrl }), (req, res) => {
       void handleMcpRequest(repo, req, res);
     });
   } else {
