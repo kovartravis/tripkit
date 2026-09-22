@@ -93,8 +93,8 @@ Add a traveler to a trip.
 | `tripId` | string | yes | |
 | `airline` | string | yes | |
 | `flightNumber` | string | yes | |
-| `departureAirport` | string | yes | 3–4 letter code, upcased on save |
-| `arrivalAirport` | string | yes | 3–4 letter code, upcased on save |
+| `departureAirport` | string | yes | 3–4 letter IATA/ICAO code; upcased on save |
+| `arrivalAirport` | string | yes | 3–4 letter IATA/ICAO code; upcased on save |
 | `departureTime` | datetime | yes | with UTC offset |
 | `arrivalTime` | datetime | yes | with UTC offset |
 | `confirmation` | string | no | |
