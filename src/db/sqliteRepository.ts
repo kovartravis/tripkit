@@ -391,10 +391,11 @@ export class SqliteTripkitRepository implements TripkitRepository {
   }
 
   listFlights(tripId: string): Flight[] {
-    const rows = this.db
-      .prepare(`SELECT * FROM flights WHERE trip_id = ? ORDER BY departure_time ASC`)
-      .all(tripId) as unknown as FlightRow[];
-    return rows.map(toFlight);
+    const rows = this.db.prepare(`SELECT * FROM flights WHERE trip_id = ?`).all(tripId) as unknown as FlightRow[];
+    // Sort by actual instant, not the stored string: ISO 8601 datetimes carry each
+    // flight's own UTC offset, so a plain string ORDER BY (or localeCompare) silently
+    // gets cross-timezone flights out of order whenever their offsets differ.
+    return rows.map(toFlight).sort((a, b) => Date.parse(a.departureTime) - Date.parse(b.departureTime));
   }
 
   // ---------------------------------------------------------------- stays
@@ -465,10 +466,9 @@ export class SqliteTripkitRepository implements TripkitRepository {
   }
 
   listStays(tripId: string): Stay[] {
-    const rows = this.db
-      .prepare(`SELECT * FROM stays WHERE trip_id = ? ORDER BY check_in ASC`)
-      .all(tripId) as unknown as StayRow[];
-    return rows.map(toStay);
+    const rows = this.db.prepare(`SELECT * FROM stays WHERE trip_id = ?`).all(tripId) as unknown as StayRow[];
+    // Same reasoning as listFlights: sort by actual instant, not the stored string.
+    return rows.map(toStay).sort((a, b) => Date.parse(a.checkIn) - Date.parse(b.checkIn));
   }
 
   // ----------------------------------------------------------------- days

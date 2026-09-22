@@ -1,0 +1,7 @@
+# A public.accounts table mirrors auth.users, because auth.users isn't reachable at all
+
+Showing a Companion who else is on a Trip means resolving an Account to at least an email address somewhere. The obvious path looks like querying `auth.users` directly — Tripkit's Postgres repository already runs as the `authenticated` role with a per-request JWT forwarded in, so it reads like the natural place to look up that data. It isn't reachable: Supabase revokes all grants on the entire `auth` schema from `authenticated` (and `anon`) — a direct Postgres connection gets `permission denied for schema auth`, not a filtered or empty result. This isn't a PostgREST-layer restriction we're bypassing by connecting directly; it's enforced at the Postgres grant level itself, so nothing on our side of the connection can read `auth.users`.
+
+We're following Supabase's own documented workaround instead: a `public.accounts` table (`id` mirroring `auth.users.id`, plus `email`) kept in sync by an `on_auth_user_created` trigger running as `SECURITY DEFINER`, the sanctioned way to bridge data out of `auth` into application-queryable tables. RLS on `public.accounts` then governs who can see which Account's email (your own, or anyone sharing a Trip with you) the same way RLS governs everything else.
+
+**Consequences**: `accounts.email` only syncs at account creation — there's no trigger on `auth.users` updates, so a Companion changing their email in Supabase Auth won't be reflected here. Accepted for now; revisit if it causes real confusion.

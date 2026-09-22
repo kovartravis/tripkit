@@ -1,0 +1,5 @@
+# Agent-only access, even for multi-user sharing
+
+Tripkit reads and writes trip data exclusively through MCP tools, called by a personal assistant agent — never through a web CRUD app. When we extended Tripkit to let multiple people share a Trip, the obvious alternative was to grow the existing read-only dashboard into a full web app so non-technical companions wouldn't need to run their own agent. We rejected that: agent-only access is Tripkit's identity (see README's "does not own... being the chat planner"), and diluting it with a parallel web write-path would mean maintaining two surfaces with the same authorization rules. Every Member, Owner included, reads and writes via their own MCP-connected agent; the web dashboard stays view-only.
+
+(A brief detour: this wording was widened to "agent-mediated, not MCP-shaped" to cover a planned second surface — an OpenAPI/REST "Actions" endpoint set for ChatGPT Custom GPTs. That surface was dropped before being built: ChatGPT's native MCP connector support covers the same Companions without a second surface to maintain, so the constraint reverts to what it always was in practice — MCP tools specifically.)
