@@ -3,6 +3,14 @@ export interface SupabaseAdminConfig {
   projectUrl: string;
   /** service_role key — required for any admin endpoint, never the anon/publishable key. */
   serviceRoleKey: string;
+  /**
+   * Where the invite email's link sends the invitee after Supabase verifies the token. Without
+   * this, GoTrue falls back to the project's dashboard-configured Site URL, which defaults to
+   * `http://localhost:3000` — a dead end for a real Member. Must also be present in the
+   * project's Auth "Redirect URLs" allow list, or GoTrue silently falls back to the Site URL
+   * anyway.
+   */
+  redirectTo?: string;
 }
 
 export class SupabaseAdminApiError extends Error {
@@ -37,6 +45,9 @@ export async function inviteUserByEmail(
   fetchImpl: typeof fetch = fetch,
 ): Promise<InviteUserByEmailResult> {
   const url = new URL("/auth/v1/invite", config.projectUrl);
+  if (config.redirectTo) {
+    url.searchParams.set("redirect_to", config.redirectTo);
+  }
   const res = await fetchImpl(url, {
     method: "POST",
     headers: {

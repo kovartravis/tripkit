@@ -34,6 +34,11 @@ Desktop configure a subprocess's environment):
   SUPABASE_DB_HOST / _USER / _PASSWORD [/ _PORT / _NAME]
                                   Direct Postgres connection (RLS is
                                   enforced per request, not via PostgREST)
+  TRIPKIT_PUBLIC_URL             Optional. A deployed dashboard's public
+                                  origin (e.g. https://your-host), so
+                                  tripkit_invite_create's invite emails link
+                                  there instead of falling back to the
+                                  Supabase project's default Site URL
 
 MCP server flags:
   tripkit mcp --http              Serve MCP over HTTP instead of stdio, so a
@@ -178,7 +183,12 @@ async function runMcpStdio(): Promise<void> {
 
   const pool = createSupabasePool(poolConfig);
   const repo = new SupabaseTripkitRepository(pool, claims);
-  const invites = new SupabaseInviteService(pool, claims, { projectUrl: projectUrl.href, serviceRoleKey });
+  const publicUrlRaw = process.env.TRIPKIT_PUBLIC_URL;
+  const invites = new SupabaseInviteService(pool, claims, {
+    projectUrl: projectUrl.href,
+    serviceRoleKey,
+    redirectTo: publicUrlRaw ? new URL("/ui", publicUrlRaw).href : undefined,
+  });
   try {
     await invites.redeemPendingInvites();
   } catch (error) {

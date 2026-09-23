@@ -26,6 +26,30 @@ describe("inviteUserByEmail", () => {
     expect(JSON.parse(init.body)).toEqual({ email: "companion@example.com" });
   });
 
+  it("appends redirect_to as a query param when config.redirectTo is set", async () => {
+    const fetchImpl = fakeFetch(200, JSON.stringify({ id: "user-1" }));
+
+    await inviteUserByEmail(
+      { ...CONFIG, redirectTo: "https://147-224-167-3.sslip.io/ui" },
+      "companion@example.com",
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    const [url] = fetchImpl.mock.calls[0]!;
+    expect((url as URL).toString()).toBe(
+      "https://example.supabase.co/auth/v1/invite?redirect_to=https%3A%2F%2F147-224-167-3.sslip.io%2Fui",
+    );
+  });
+
+  it("omits redirect_to when config.redirectTo is unset", async () => {
+    const fetchImpl = fakeFetch(200, JSON.stringify({ id: "user-1" }));
+
+    await inviteUserByEmail(CONFIG, "companion@example.com", fetchImpl as unknown as typeof fetch);
+
+    const [url] = fetchImpl.mock.calls[0]!;
+    expect((url as URL).toString()).toBe("https://example.supabase.co/auth/v1/invite");
+  });
+
   it("returns 'already_exists' on a 422 (the email already has an Account)", async () => {
     const fetchImpl = fakeFetch(422, JSON.stringify({ error_code: "email_exists" }));
 

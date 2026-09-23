@@ -104,6 +104,7 @@ export async function runHttpServer(options: HttpServerOptions): Promise<HttpSer
   const adminConfig: SupabaseAdminConfig = {
     projectUrl: supabase.projectUrl.href,
     serviceRoleKey: supabase.serviceRoleKey,
+    redirectTo: new URL("/ui", supabase.publicUrl).href,
   };
 
   // Lazy and shared by every route below (both /mcp and the dashboard): a config problem only
