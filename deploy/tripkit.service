@@ -9,7 +9,7 @@ User=tripkit
 Group=tripkit
 WorkingDirectory=/opt/tripkit/app
 EnvironmentFile=/etc/tripkit.env
-ExecStart=/usr/bin/node dist/cli/index.js mcp --http --port 4700 --host 127.0.0.1 --public-url https://147-224-167-3.sslip.io
+ExecStart=/usr/bin/node dist/cli/index.js mcp --http --port 4700 --host 127.0.0.1 --public-url https://tripkit.duckdns.org
 Restart=on-failure
 RestartSec=5
 
