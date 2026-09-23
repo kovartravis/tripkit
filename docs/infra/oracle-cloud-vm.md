@@ -28,6 +28,46 @@ oci compute instance get --instance-id <instance-id> --query 'data."lifecycle-st
 
 Instance, VCN, and related OCIDs are not recorded here (they're not secret, but they're also not needed by anyone reading this file — look them up live via `oci compute instance list` / `oci network vcn list` by display name, all prefixed `tripkit-`).
 
-## Gap for the next ticket (#25)
+## Deployment (#25)
 
-Nothing runs on the VM yet beyond the base OS + Node.js. #25 still needs: cloning/deploying Tripkit itself, a systemd unit so it survives reboots and SSH disconnects, and a reverse proxy (e.g. Caddy) terminating TLS on 80/443 and forwarding to Tripkit's own port.
+Tripkit itself now runs on the VM, reachable at **https://147-224-167-3.sslip.io**:
+
+- **App**: cloned at `/opt/tripkit/app`, owned by a dedicated unprivileged
+  `tripkit` system user (home dir `/opt/tripkit`). Deployed by `git pull`
+  + `npm ci` + `npm run build` as that user; there's no CD pipeline yet,
+  redeploys are manual.
+- **Process manager**: `deploy/tripkit.service` (checked into this repo),
+  installed at `/etc/systemd/system/tripkit.service`. Runs
+  `node dist/cli/index.js mcp --http --port 4700 --host 127.0.0.1 --public-url https://147-224-167-3.sslip.io`,
+  `Restart=on-failure`, enabled so it survives reboots. Secrets come from
+  `/etc/tripkit.env` (root:root, mode 600 — not in this repo), which sets
+  `TRIPKIT_SUPABASE_URL`, `TRIPKIT_SUPABASE_ANON_KEY`,
+  `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_DB_HOST/PORT/USER/NAME/PASSWORD`
+  for the production Supabase project.
+- **TLS / reverse proxy**: Caddy (installed via the official apt repo),
+  config at `/etc/caddy/Caddyfile` (mirrors `deploy/Caddyfile` in this
+  repo), terminates TLS on 80/443 and forwards to `127.0.0.1:4700`. Cert is
+  a real Let's Encrypt cert for the `147-224-167-3.sslip.io` hostname —
+  [sslip.io](https://sslip.io) is a free wildcard-DNS service that resolves
+  `<ip-with-dashes>.sslip.io` straight to that IP, used here instead of a
+  purchased domain. Caddy renews automatically.
+- **Port 4700**: Tripkit itself only binds to loopback now; the security
+  list / `iptables` rule that opened 4700 externally (see above) is
+  harmless but no longer load-bearing — all public traffic comes in over
+  443 via Caddy.
+
+**Caveat**: the public URL is tied to the VM's current IP
+(`147.224.167.3`). If the instance is ever recreated (new IP), the
+`--public-url` in `tripkit.service` and the hostname in the Caddyfile both
+need updating to match, and clients will need to reconnect at the new URL.
+A real domain (an A record pointed at whatever IP the VM has) would remove
+this coupling — swap to one later by editing those two files and re-issuing
+the Caddy cert.
+
+Redeploying a new build:
+
+```sh
+ssh -i ~/.ssh/tripkit_oci ubuntu@147.224.167.3
+sudo -u tripkit bash -c 'cd /opt/tripkit/app && git pull && npm ci && npm run build'
+sudo systemctl restart tripkit
+```
