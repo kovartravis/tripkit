@@ -16,6 +16,7 @@ import { createTripkitMcpServer } from "./server.js";
 import { fetchSupabaseOAuthMetadata } from "./oauth/supabaseMetadata.js";
 import { createSupabaseTokenVerifier, createSupabaseSessionVerifier } from "./oauth/supabaseTokenVerifier.js";
 import { renderDashboardPage } from "./ui/dashboard.js";
+import { renderOAuthConsentPage } from "./ui/oauthConsent.js";
 import { buildDayItineraries } from "./ui/itinerary.js";
 import { loadTripExportBundle } from "../export/markdown.js";
 
@@ -100,6 +101,14 @@ export async function runHttpServer(options: HttpServerOptions): Promise<HttpSer
   // loopback; trusting only loopback lets express-rate-limit read X-Forwarded-For safely
   // without trusting arbitrary upstream hops.
   app.set("trust proxy", "loopback");
+  // None of Tripkit's pages are meant to be embedded in an iframe -- most importantly
+  // /oauth/consent, whose whole job is a click on "Approve" that grants an OAuth client access
+  // to the signer-in's account, exactly what a clickjacking overlay would try to hijack.
+  app.use((_req, res, next) => {
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    next();
+  });
 
   const adminConfig: SupabaseAdminConfig = {
     projectUrl: supabase.projectUrl.href,
@@ -235,6 +244,14 @@ export async function runHttpServer(options: HttpServerOptions): Promise<HttpSer
 
   app.get("/ui", (_req, res) => {
     res.status(200).send(renderDashboardPage({ url: supabase.projectUrl.href, anonKey: supabase.anonKey }));
+  });
+
+  // Supabase's OAuth 2.1 Server sends users here (its configured Authorization Path) mid-flow,
+  // with an authorization_id query param -- this is Tripkit's consent screen, not Supabase's
+  // (see src/mcp/ui/oauthConsent.ts). Must match the Authorization Path set in the Supabase
+  // dashboard under Authentication > OAuth Server.
+  app.get("/oauth/consent", (_req, res) => {
+    res.status(200).send(renderOAuthConsentPage({ url: supabase.projectUrl.href, anonKey: supabase.anonKey }));
   });
 
   app.get("/", (_req, res) => res.redirect("/ui"));
