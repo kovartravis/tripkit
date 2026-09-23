@@ -51,7 +51,7 @@ async function main() {
     ? new URL("/ui", process.env.TRIPKIT_PUBLIC_URL).href
     : undefined;
 
-  const { inviteUserByEmail } = await import(
+  const { inviteUserByEmail, sendPasswordRecoveryEmail } = await import(
     path.join(repoRoot, "dist/integrations/supabaseAdmin.js")
   );
 
@@ -59,9 +59,15 @@ async function main() {
   const result = await inviteUserByEmail({ projectUrl, serviceRoleKey, redirectTo }, email);
   if (result.outcome === "invited") {
     console.log(`Invite sent. ${email} should check their inbox to set a password.`);
-  } else {
-    console.log(`${email} already has a Supabase Account — no invite email needed.`);
+    return;
   }
+
+  // The Account already exists (e.g. created by an earlier invite call whose link 404'd before
+  // this script passed redirect_to) but may never have had its password set — send a password
+  // reset instead, which uses the same redirect_to and gets them back to a working link.
+  console.log(`${email} already has a Supabase Account — sending a password reset instead...`);
+  await sendPasswordRecoveryEmail({ projectUrl, serviceRoleKey, redirectTo }, email);
+  console.log(`Password reset sent. ${email} should check their inbox to set a password.`);
 }
 
 main().catch((error) => {

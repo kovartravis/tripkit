@@ -66,3 +66,34 @@ export async function inviteUserByEmail(
   }
   throw new SupabaseAdminApiError(res.status, await res.text());
 }
+
+/**
+ * Sends a "reset your password" email via GoTrue's public `/recover` endpoint — the same call
+ * `supabase.auth.resetPasswordForEmail` makes. Needed alongside `inviteUserByEmail` because an
+ * invite only sends a set-password link the *first* time an Account is created; an Account that
+ * already exists but never had its password set (e.g. an invite link that 404'd before this
+ * codebase started passing `redirect_to`) has no other way back in.
+ */
+export async function sendPasswordRecoveryEmail(
+  config: SupabaseAdminConfig,
+  email: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const url = new URL("/auth/v1/recover", config.projectUrl);
+  if (config.redirectTo) {
+    url.searchParams.set("redirect_to", config.redirectTo);
+  }
+  const res = await fetchImpl(url, {
+    method: "POST",
+    headers: {
+      apikey: config.serviceRoleKey,
+      Authorization: `Bearer ${config.serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ email }),
+  });
+
+  if (!res.ok) {
+    throw new SupabaseAdminApiError(res.status, await res.text());
+  }
+}

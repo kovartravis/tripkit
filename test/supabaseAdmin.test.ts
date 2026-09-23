@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import { inviteUserByEmail, SupabaseAdminApiError } from "../src/integrations/supabaseAdmin.js";
+import {
+  inviteUserByEmail,
+  sendPasswordRecoveryEmail,
+  SupabaseAdminApiError,
+} from "../src/integrations/supabaseAdmin.js";
 
 const CONFIG = { projectUrl: "https://example.supabase.co", serviceRoleKey: "service-role-key" };
 
@@ -63,6 +67,43 @@ describe("inviteUserByEmail", () => {
 
     await expect(
       inviteUserByEmail(CONFIG, "companion@example.com", fetchImpl as unknown as typeof fetch),
+    ).rejects.toThrow(SupabaseAdminApiError);
+  });
+});
+
+describe("sendPasswordRecoveryEmail", () => {
+  it("posts to /auth/v1/recover with the email and an optional redirect_to", async () => {
+    const fetchImpl = fakeFetch(200, "{}");
+
+    await sendPasswordRecoveryEmail(
+      { ...CONFIG, redirectTo: "https://tripkit.duckdns.org/ui" },
+      "owner@example.com",
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect((url as URL).toString()).toBe(
+      "https://example.supabase.co/auth/v1/recover?redirect_to=https%3A%2F%2Ftripkit.duckdns.org%2Fui",
+    );
+    expect(init.method).toBe("POST");
+    expect(init.headers.apikey).toBe("service-role-key");
+    expect(JSON.parse(init.body)).toEqual({ email: "owner@example.com" });
+  });
+
+  it("omits redirect_to when config.redirectTo is unset", async () => {
+    const fetchImpl = fakeFetch(200, "{}");
+
+    await sendPasswordRecoveryEmail(CONFIG, "owner@example.com", fetchImpl as unknown as typeof fetch);
+
+    const [url] = fetchImpl.mock.calls[0]!;
+    expect((url as URL).toString()).toBe("https://example.supabase.co/auth/v1/recover");
+  });
+
+  it("throws on a non-2xx response", async () => {
+    const fetchImpl = fakeFetch(500, "internal error");
+
+    await expect(
+      sendPasswordRecoveryEmail(CONFIG, "owner@example.com", fetchImpl as unknown as typeof fetch),
     ).rejects.toThrow(SupabaseAdminApiError);
   });
 });
