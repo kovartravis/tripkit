@@ -94,11 +94,9 @@ export class SupabaseInviteService {
    * as the spec calls for ("once per new access-token session ... not on every tool call"):
    * a second call with nothing pending is a no-op.
    *
-   * Not yet invoked from any request path: `httpServer.ts` still serves trip data off
-   * `SqliteTripkitRepository` even in `--supabase-url` auth mode (auth verification only,
-   * per ticket #18 — "no trip data flows yet"). Wiring a per-request `SupabaseInviteService`
-   * (and calling this here) is ticket #23's job, when the Supabase cutover replaces SQLite
-   * as the sole data path.
+   * Invoked from every /mcp request and every dashboard /api/* request (`httpServer.ts`'s
+   * `redeemInvitesBestEffort`), best-effort: a failure here is logged and swallowed rather than
+   * failing the request it was piggybacking on.
    */
   async redeemPendingInvites(): Promise<void> {
     return this.withAuth(async (client) => {

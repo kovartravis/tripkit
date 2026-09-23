@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { Pool } from "pg";
 import { createSupabasePool, supabasePoolConfigFromEnv } from "../../src/db/postgres/pool.js";
 import { SupabaseTripkitRepository } from "../../src/db/postgres/supabaseTripkitRepository.js";
@@ -39,7 +36,6 @@ const hasCreds = Boolean(SUPABASE_URL && SERVICE_ROLE_KEY && poolConfig);
 describe.skipIf(!hasCreds)("GET /api/trips (Supabase dashboard auth, live Postgres)", () => {
   let pool: Pool;
   let handle: HttpServerHandle;
-  let dataDir: string;
   let tripkitBaseUrl: string;
   let ownerId: string;
   let companionId: string;
@@ -114,16 +110,14 @@ describe.skipIf(!hasCreds)("GET /api/trips (Supabase dashboard auth, live Postgr
     ownerTripId = trip.id;
     createdTripIds.push(trip.id);
 
-    dataDir = mkdtempSync(join(tmpdir(), "tripkit-dashboard-auth-"));
-    handle = await runHttpServer(new SupabaseTripkitRepository(pool, { sub: ownerId, role: "authenticated" }), {
+    handle = await runHttpServer({
       host: "127.0.0.1",
       port: TRIPKIT_PORT,
-      dataDir,
-      auth: {
-        kind: "supabase",
+      supabase: {
         projectUrl: new URL(SUPABASE_URL!),
         publicUrl: new URL("https://tripkit-dashboard-test.example.com"),
         anonKey: "unused-by-this-test",
+        serviceRoleKey: SERVICE_ROLE_KEY!,
       },
     });
     tripkitBaseUrl = `http://127.0.0.1:${TRIPKIT_PORT}`;
@@ -141,7 +135,6 @@ describe.skipIf(!hasCreds)("GET /api/trips (Supabase dashboard auth, live Postgr
     }
     await Promise.all([deleteTestAccount(ownerId), deleteTestAccount(companionId)]);
     await pool.end();
-    rmSync(dataDir, { recursive: true, force: true });
   });
 
   it("rejects a request with no Authorization header", async () => {

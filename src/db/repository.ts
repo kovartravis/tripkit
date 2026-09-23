@@ -42,13 +42,10 @@ export interface QueryResult {
 }
 
 /**
- * Storage port. v1 shipped a SQLite-backed implementation
- * (`SqliteTripkitRepository`) for local-first use; `SupabaseTripkitRepository` implements the
- * same interface against Postgres/RLS. Every data-access method is async because RLS
- * enforcement requires a real network round trip per call (see
- * `SupabaseTripkitRepository.withAuth`) — `SqliteTripkitRepository`'s methods are still
- * synchronous under the hood but satisfy this interface trivially since an `async` method
- * whose body has nothing to await still returns a `Promise` that resolves on the same tick.
+ * Storage port. `SupabaseTripkitRepository` (`src/db/postgres/`) is the only implementation —
+ * v1's local-first `SqliteTripkitRepository` was deleted once every path required a Supabase
+ * Account (ADR 0004). Every data-access method is async because RLS enforcement requires a
+ * real network round trip per call — see `SupabaseTripkitRepository.withAuth`.
  */
 export interface TripkitRepository {
   createTrip(input: TripCreateInput): Promise<Trip>;

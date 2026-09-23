@@ -1,15 +1,23 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
-import { openDatabase } from "../src/db/client.js";
-import { SqliteTripkitRepository } from "../src/db/sqliteRepository.js";
 import { runHttpServer, type HttpServerHandle } from "../src/mcp/httpServer.js";
 
 const ALG = "RS256";
 const KID = "test-key";
+
+// Postgres connection env vars this file borrows for the "reaches the MCP handler" test: a
+// pg.Pool doesn't actually connect until a query runs (see redeemInvitesBestEffort's
+// catch-and-log in httpServer.ts), so any string values are enough to let repo construction
+// succeed without a reachable database. Saved and restored around the suite so this never
+// leaks into test/postgres/*.test.ts's real SUPABASE_DB_* credentials when a worker is shared
+// across files.
+const FAKE_DB_ENV: Record<string, string> = {
+  SUPABASE_DB_HOST: "fake-host.invalid",
+  SUPABASE_DB_USER: "fake-user",
+  SUPABASE_DB_PASSWORD: "fake-password",
+};
+const savedEnv: Record<string, string | undefined> = {};
 
 /** A minimal stand-in for Supabase's own OAuth server: just discovery + JWKS. */
 function startFakeSupabase(publicJwk: object): Promise<{ server: Server; baseUrl: URL }> {
@@ -51,24 +59,29 @@ describe("runHttpServer with Supabase auth", () => {
   let signingKey: Awaited<ReturnType<typeof generateKeyPair>>;
   let handle: HttpServerHandle;
   let tripkitBaseUrl: string;
-  let dataDir: string;
 
   const TRIPKIT_PORT = 48173;
   const PUBLIC_URL = "https://tripkit.example.com";
 
   beforeAll(async () => {
+    for (const [key, value] of Object.entries(FAKE_DB_ENV)) {
+      savedEnv[key] = process.env[key];
+      process.env[key] = value;
+    }
+
     signingKey = await generateKeyPair(ALG, { extractable: true });
     const publicJwk = { ...(await exportJWK(signingKey.publicKey)), alg: ALG, kid: KID };
     fakeSupabase = await startFakeSupabase(publicJwk);
 
-    dataDir = mkdtempSync(join(tmpdir(), "tripkit-supabase-auth-"));
-    const repo = new SqliteTripkitRepository(openDatabase(":memory:"));
-
-    handle = await runHttpServer(repo, {
+    handle = await runHttpServer({
       host: "127.0.0.1",
       port: TRIPKIT_PORT,
-      dataDir,
-      auth: { kind: "supabase", projectUrl: fakeSupabase.baseUrl, publicUrl: new URL(PUBLIC_URL), anonKey: "test-anon-key" },
+      supabase: {
+        projectUrl: fakeSupabase.baseUrl,
+        publicUrl: new URL(PUBLIC_URL),
+        anonKey: "test-anon-key",
+        serviceRoleKey: "test-service-role-key",
+      },
     });
     tripkitBaseUrl = `http://127.0.0.1:${TRIPKIT_PORT}`;
   });
@@ -76,7 +89,10 @@ describe("runHttpServer with Supabase auth", () => {
   afterAll(async () => {
     await handle.close();
     fakeSupabase.server.close();
-    rmSync(dataDir, { recursive: true, force: true });
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
 
   function signToken(
@@ -152,5 +168,17 @@ describe("runHttpServer with Supabase auth", () => {
       }),
     });
     expect(res.status).toBe(200);
+  });
+
+  it("rejects a request with no Authorization header on /api/trips", async () => {
+    const res = await fetch(`${tripkitBaseUrl}/api/trips`);
+    expect(res.status).toBe(401);
+  });
+
+  it("serves the dashboard shell at /ui with no auth gate of its own (auth happens client-side)", async () => {
+    const res = await fetch(`${tripkitBaseUrl}/ui`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("supabase-js");
   });
 });

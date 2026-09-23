@@ -1,24 +1,20 @@
 export interface DashboardPageOptions {
-  /**
-   * Present only in `auth.kind === "supabase"` mode: the dashboard signs in via Supabase's own
-   * hosted login (client-side, using this project's public anon key — safe to embed, per
-   * Supabase's own design) instead of the owner-passphrase cookie flow. Absent in every other
-   * auth mode, which keeps rendering exactly what it always has.
-   */
-  supabase?: { url: string; anonKey: string };
+  /** The dashboard signs in via Supabase's own hosted login, client-side, using this project's
+   * public anon key — safe to embed, per Supabase's own design. */
+  url: string;
+  anonKey: string;
 }
 
 /**
  * Read-only day-by-day itinerary dashboard. A single static HTML document
  * (Tailwind via CDN, vanilla JS) that renders whatever /api/trips and
- * /api/trips/:id/itinerary return — no build step, matching the rest of
- * this local-first tool.
+ * /api/trips/:id/itinerary return — no build step, matching how this
+ * codebase avoids one elsewhere.
  */
-export function renderDashboardPage(opts: DashboardPageOptions = {}): string {
-  const supabaseConfig = opts.supabase;
+export function renderDashboardPage(opts: DashboardPageOptions): string {
   // Server-controlled values only (a CLI flag / env var, not user input), but escape `</` all
   // the same so nothing here can prematurely close this inline <script> tag.
-  const supabaseConfigJson = supabaseConfig ? JSON.stringify(supabaseConfig).replace(/<\//g, "<\\/") : "null";
+  const supabaseConfigJson = JSON.stringify({ url: opts.url, anonKey: opts.anonKey }).replace(/<\//g, "<\\/");
 
   return `<!doctype html>
 <html lang="en">
@@ -31,7 +27,7 @@ export function renderDashboardPage(opts: DashboardPageOptions = {}): string {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
-${supabaseConfig ? '<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>' : ""}
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
   window.__TRIPKIT_SUPABASE__ = ${supabaseConfigJson};
   tailwind.config = {

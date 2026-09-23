@@ -1,51 +1,80 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { openDatabase } from "../src/db/client.js";
-import { SqliteTripkitRepository } from "../src/db/sqliteRepository.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import { fakeTripkitRepository } from "./support/fakeRepository.js";
 import { exportMarkdown } from "../src/export/markdown.js";
 import { exportIcs } from "../src/export/ics.js";
-import type { DatabaseSync } from "node:sqlite";
+import type { TripkitRepository } from "../src/db/repository.js";
 import type { Day, Trip } from "../src/domain/types.js";
 
 describe("exports", () => {
-  let db: DatabaseSync;
-  let repo: SqliteTripkitRepository;
+  let repo: TripkitRepository;
   let trip: Trip;
   let day: Day;
 
-  beforeEach(async () => {
-    db = openDatabase(":memory:");
-    repo = new SqliteTripkitRepository(db);
-    trip = await repo.createTrip({
+  beforeEach(() => {
+    const ts = "2026-01-01T00:00:00Z";
+    trip = {
+      id: "trip-1",
       name: "Japan 2026",
       startDate: "2026-04-10",
       endDate: "2026-04-13",
       homeTimezone: "America/Los_Angeles",
       notes: "Cherry blossom trip",
-    });
-    await repo.addFlight({
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    day = {
+      id: "day-1",
       tripId: trip.id,
-      airline: "ANA",
-      flightNumber: "NH7",
-      departureAirport: "SFO",
-      arrivalAirport: "HND",
-      departureTime: "2026-04-10T13:15:00-07:00",
-      arrivalTime: "2026-04-11T16:50:00+09:00",
-      confirmation: "ABC123",
-    });
-    await repo.addStay({
-      tripId: trip.id,
-      name: "Park Hyatt Tokyo",
-      checkIn: "2026-04-11T15:00:00+09:00",
-      checkOut: "2026-04-13T11:00:00+09:00",
-    });
-    day = await repo.upsertDay({ tripId: trip.id, date: "2026-04-12", title: "Tokyo" });
-    day = await repo.setDayPlan(day.id, [
-      { startTime: "09:00", endTime: "10:30", type: "activity", title: "Senso-ji", place: "Asakusa" },
-    ]);
-  });
+      date: "2026-04-12",
+      title: "Tokyo",
+      blocks: [
+        {
+          id: "block-1",
+          dayId: "day-1",
+          order: 0,
+          startTime: "09:00",
+          endTime: "10:30",
+          type: "activity",
+          title: "Senso-ji",
+          place: "Asakusa",
+        },
+      ],
+      createdAt: ts,
+      updatedAt: ts,
+    };
 
-  afterEach(() => {
-    repo.close();
+    repo = fakeTripkitRepository({
+      trip,
+      flights: [
+        {
+          id: "flight-1",
+          tripId: trip.id,
+          airline: "ANA",
+          flightNumber: "NH7",
+          departureAirport: "SFO",
+          arrivalAirport: "HND",
+          departureTime: "2026-04-10T13:15:00-07:00",
+          arrivalTime: "2026-04-11T16:50:00+09:00",
+          confirmation: "ABC123",
+          travelerIds: [],
+          createdAt: ts,
+          updatedAt: ts,
+        },
+      ],
+      stays: [
+        {
+          id: "stay-1",
+          tripId: trip.id,
+          name: "Park Hyatt Tokyo",
+          checkIn: "2026-04-11T15:00:00+09:00",
+          checkOut: "2026-04-13T11:00:00+09:00",
+          guestIds: [],
+          createdAt: ts,
+          updatedAt: ts,
+        },
+      ],
+      days: [day],
+    });
   });
 
   it("renders a markdown export with trip sections", async () => {

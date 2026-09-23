@@ -16,11 +16,7 @@ import { registerInviteTools } from "./tools/invite.js";
 export const TRIPKIT_SERVER_NAME = "tripkit";
 export const TRIPKIT_SERVER_VERSION = "0.1.0";
 
-/**
- * `invites` is optional and Supabase-specific (see `SupabaseInviteService`'s own doc comment)
- * — omitted entirely for the SQLite-backed server, which registers no `tripkit_invite_*` tools.
- */
-export function createTripkitMcpServer(repo: TripkitRepository, invites?: SupabaseInviteService): McpServer {
+export function createTripkitMcpServer(repo: TripkitRepository, invites: SupabaseInviteService): McpServer {
   const server = new McpServer({
     name: TRIPKIT_SERVER_NAME,
     version: TRIPKIT_SERVER_VERSION,
@@ -36,9 +32,7 @@ export function createTripkitMcpServer(repo: TripkitRepository, invites?: Supaba
   registerPlaceTools(server);
   registerQueryTools(server, repo);
   registerExportTools(server, repo);
-  if (invites) {
-    registerInviteTools(server, invites);
-  }
+  registerInviteTools(server, invites);
 
   return server;
 }

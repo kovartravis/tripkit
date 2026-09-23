@@ -1,104 +1,79 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { createRemoteJWKSet } from "jose";
 import { createTripkitMcpServer, TRIPKIT_SERVER_VERSION } from "../mcp/server.js";
-import { runHttpServer, listLanAddresses, type AuthMode } from "../mcp/httpServer.js";
-import { openDatabase } from "../db/client.js";
-import { SqliteTripkitRepository } from "../db/sqliteRepository.js";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { randomBytes } from "node:crypto";
-import { initProjectDataDir, resolveDataDir, resolveDbPath } from "../utils/paths.js";
-import { supabasePoolConfigFromEnv } from "../db/postgres/pool.js";
+import { runHttpServer, listLanAddresses } from "../mcp/httpServer.js";
+import { fetchSupabaseOAuthMetadata } from "../mcp/oauth/supabaseMetadata.js";
+import { createSupabaseSessionVerifier } from "../mcp/oauth/supabaseTokenVerifier.js";
+import { createSupabasePool, supabasePoolConfigFromEnv } from "../db/postgres/pool.js";
+import { SupabaseTripkitRepository } from "../db/postgres/supabaseTripkitRepository.js";
+import { SupabaseInviteService } from "../db/postgres/invites.js";
 
 const DEFAULT_HTTP_PORT = 4700;
 
 const USAGE = `tripkit ${TRIPKIT_SERVER_VERSION}
 
+Every path requires a Supabase Account (ADR 0004) — there is no local-only
+or account-free mode.
+
 Usage:
   tripkit mcp       Start the Tripkit MCP server on stdio
-  tripkit init      Initialize a local .tripkit/ data directory in this folder
-  tripkit status    Show where Tripkit's data lives and a quick summary
   tripkit --help    Show this help
+
+Stdio mode (env vars only, no flags — matches how MCP clients like Claude
+Desktop configure a subprocess's environment):
+  TRIPKIT_SUPABASE_URL           Your Supabase project's base URL
+                                  (e.g. https://<ref>.supabase.co)
+  TRIPKIT_SUPABASE_ACCESS_TOKEN  Your own Supabase session access token
+                                  (obtained via Supabase's own sign-in —
+                                  see README), scoping the whole stdio
+                                  session to your Account
+  SUPABASE_SERVICE_ROLE_KEY      The project's service_role key (needed
+                                  for tripkit_invite_create's Admin API
+                                  call)
+  SUPABASE_DB_HOST / _USER / _PASSWORD [/ _PORT / _NAME]
+                                  Direct Postgres connection (RLS is
+                                  enforced per request, not via PostgREST)
 
 MCP server flags:
   tripkit mcp --http              Serve MCP over HTTP instead of stdio, so a
-                                   phone or other device on your network can
-                                   connect (default: 0.0.0.0:${DEFAULT_HTTP_PORT}).
+                                   phone, other device, or remote MCP client
+                                   (dynamic client registration + PKCE
+                                   against Supabase's own OAuth 2.1 server)
+                                   can connect (default: 0.0.0.0:${DEFAULT_HTTP_PORT}).
                                    Also serves a day-by-day itinerary
-                                   dashboard at /ui, gated independently of
-                                   whichever flag below controls /mcp: an
-                                   owner passphrase in every mode except
-                                   --supabase-url, where Members sign in via
-                                   Supabase's own hosted login instead.
+                                   dashboard at /ui — a Member signs in there
+                                   via Supabase's own hosted login.
   tripkit mcp --http --port N     Use a specific port
   tripkit mcp --http --host H     Bind a specific address (default 0.0.0.0)
-  tripkit mcp --http --token T    Require "Authorization: Bearer T" on /mcp
-                                   (a token is auto-generated and printed if
-                                   omitted)
-  tripkit mcp --http --no-auth    Disable auth on /mcp entirely (/ui stays
-                                   passphrase-protected; only do this on a
-                                   network you trust)
-  tripkit mcp --http --oauth \
-    --public-url URL              Serve a full MCP OAuth 2.1 flow on /mcp
-                                   (dynamic client registration + authorization
-                                   code + refresh tokens) instead of a static
-                                   bearer token, for clients that expect OAuth
-                                   (e.g. Muse). URL is the exact public HTTPS
-                                   origin clients will reach this server at
-                                   (e.g. your tunnel's URL) — it's used as the
-                                   OAuth issuer identity.
-  tripkit mcp --http --oauth-password P
-                                   Set/reset the owner passphrase that gates
-                                   /ui and (with --oauth) /authorize (one is
-                                   auto-generated and printed on first run if
-                                   omitted).
-  tripkit mcp --http --supabase-url URL \
-    --supabase-anon-key KEY \
-    --public-url URL              Verify /mcp bearer tokens against a
-                                   Supabase project's own OAuth 2.1 server
-                                   instead of Tripkit's — clients register
-                                   and authenticate directly with Supabase
-                                   (dynamic client registration, PKCE), and
-                                   Tripkit only checks the tokens they bring
-                                   back. --supabase-url is the project's base
-                                   URL (e.g. https://<ref>.supabase.co);
+  tripkit mcp --http --supabase-url URL \\
+    --supabase-anon-key KEY \\
+    --public-url URL              --supabase-url is the project's base URL
+                                   (e.g. https://<ref>.supabase.co);
                                    --supabase-anon-key is that project's
                                    public anon key (safe to expose — it's
-                                   embedded in the /ui dashboard so a Member
-                                   can sign in there via Supabase's own
-                                   hosted login); --public-url is (as with
-                                   --oauth) the public HTTPS origin clients
-                                   reach this server at. /ui and /api/*
-                                   authenticate Members via Supabase in this
-                                   mode too, not an owner passphrase — set
+                                   embedded in the /ui dashboard);
+                                   --public-url is the exact public HTTPS
+                                   origin clients will reach this server at
+                                   (e.g. your tunnel's URL) — used as the
+                                   resource server identity clients discover
+                                   Supabase's OAuth server through. Also
+                                   requires SUPABASE_SERVICE_ROLE_KEY and
                                    SUPABASE_DB_HOST/USER/PASSWORD (see
-                                   README) so the dashboard can reach
-                                   Postgres directly.
-
-Data resolution: a ./.tripkit directory in the current folder (created by
-"tripkit init") is used if present; otherwise Tripkit falls back to a
-per-user data directory shared across projects.`;
+                                   stdio mode above) to be set as env vars.`;
 
 function parseMcpArgs(args: string[]): {
   http: boolean;
   port: number;
   host: string;
-  token: string | undefined;
-  noAuth: boolean;
-  oauth: boolean;
   publicUrl: string | undefined;
-  oauthPassword: string | undefined;
   supabaseUrl: string | undefined;
   supabaseAnonKey: string | undefined;
 } {
   let http = false;
   let port = DEFAULT_HTTP_PORT;
   let host = "0.0.0.0";
-  let token: string | undefined = process.env.TRIPKIT_HTTP_TOKEN;
-  let noAuth = false;
-  let oauth = false;
   let publicUrl: string | undefined;
-  let oauthPassword: string | undefined = process.env.TRIPKIT_OAUTH_PASSWORD;
   let supabaseUrl: string | undefined = process.env.TRIPKIT_SUPABASE_URL;
   let supabaseAnonKey: string | undefined = process.env.TRIPKIT_SUPABASE_ANON_KEY;
 
@@ -114,20 +89,8 @@ function parseMcpArgs(args: string[]): {
       case "--host":
         host = args[++i] ?? host;
         break;
-      case "--token":
-        token = args[++i];
-        break;
-      case "--no-auth":
-        noAuth = true;
-        break;
-      case "--oauth":
-        oauth = true;
-        break;
       case "--public-url":
         publicUrl = args[++i];
-        break;
-      case "--oauth-password":
-        oauthPassword = args[++i];
         break;
       case "--supabase-url":
         supabaseUrl = args[++i];
@@ -142,42 +105,93 @@ function parseMcpArgs(args: string[]): {
     }
   }
 
-  const supabase = supabaseUrl !== undefined;
-  if ([noAuth, oauth, supabase, token !== undefined].filter(Boolean).length > 1) {
-    console.error("--token, --no-auth, --oauth, and --supabase-url are mutually exclusive\n");
-    console.log(USAGE);
-    process.exit(1);
-  }
-  if (oauth && !publicUrl) {
-    console.error("--oauth requires --public-url <https-url>\n");
-    console.log(USAGE);
-    process.exit(1);
-  }
-  if (supabase && !publicUrl) {
-    console.error("--supabase-url requires --public-url <https-url>\n");
-    console.log(USAGE);
-    process.exit(1);
-  }
-  if (supabase && !supabaseAnonKey) {
-    console.error("--supabase-url requires --supabase-anon-key <key>\n");
-    console.log(USAGE);
-    process.exit(1);
+  if (http) {
+    if (!publicUrl) {
+      console.error("--http requires --public-url <https-url>\n");
+      console.log(USAGE);
+      process.exit(1);
+    }
+    if (!supabaseUrl) {
+      console.error("--http requires --supabase-url <url> (or TRIPKIT_SUPABASE_URL)\n");
+      console.log(USAGE);
+      process.exit(1);
+    }
+    if (!supabaseAnonKey) {
+      console.error("--http requires --supabase-anon-key <key> (or TRIPKIT_SUPABASE_ANON_KEY)\n");
+      console.log(USAGE);
+      process.exit(1);
+    }
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error("--http requires SUPABASE_SERVICE_ROLE_KEY to be set\n");
+      console.log(USAGE);
+      process.exit(1);
+    }
+    // The dashboard and /mcp both connect to Postgres directly — fail before binding a port
+    // rather than letting the first request hit a missing-config error.
+    if (!supabasePoolConfigFromEnv()) {
+      console.error(
+        "--http also requires SUPABASE_DB_HOST, SUPABASE_DB_USER, and SUPABASE_DB_PASSWORD to be set\n",
+      );
+      console.log(USAGE);
+      process.exit(1);
+    }
   }
 
-  return { http, port, host, token, noAuth, oauth, publicUrl, oauthPassword, supabaseUrl, supabaseAnonKey };
+  return { http, port, host, publicUrl, supabaseUrl, supabaseAnonKey };
 }
 
 async function runMcpStdio(): Promise<void> {
-  const dbPath = resolveDbPath();
-  const db = openDatabase(dbPath);
-  const repo = new SqliteTripkitRepository(db);
-  const server = createTripkitMcpServer(repo);
+  const projectUrlRaw = process.env.TRIPKIT_SUPABASE_URL;
+  const accessToken = process.env.TRIPKIT_SUPABASE_ACCESS_TOKEN;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const poolConfig = supabasePoolConfigFromEnv();
+
+  if (!projectUrlRaw || !accessToken || !serviceRoleKey || !poolConfig) {
+    console.error(
+      "tripkit mcp (stdio) requires TRIPKIT_SUPABASE_URL, TRIPKIT_SUPABASE_ACCESS_TOKEN, " +
+        "SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_DB_HOST/USER/PASSWORD to be set. Run \"tripkit --help\".",
+    );
+    process.exit(1);
+  }
+
+  let projectUrl: URL;
+  try {
+    projectUrl = new URL(projectUrlRaw);
+  } catch {
+    console.error(`Invalid TRIPKIT_SUPABASE_URL: ${projectUrlRaw}`);
+    process.exit(1);
+  }
+
+  const oauthMetadata = await fetchSupabaseOAuthMetadata(projectUrl);
+  const sessionVerifier = createSupabaseSessionVerifier({
+    issuer: oauthMetadata.issuer,
+    getKey: createRemoteJWKSet(new URL(oauthMetadata.jwks_uri)),
+  });
+
+  let claims;
+  try {
+    claims = await sessionVerifier(accessToken);
+  } catch (error) {
+    console.error(`TRIPKIT_SUPABASE_ACCESS_TOKEN is invalid or expired: ${error instanceof Error ? error.message : error}`);
+    process.exit(1);
+  }
+
+  const pool = createSupabasePool(poolConfig);
+  const repo = new SupabaseTripkitRepository(pool, claims);
+  const invites = new SupabaseInviteService(pool, claims, { projectUrl: projectUrl.href, serviceRoleKey });
+  try {
+    await invites.redeemPendingInvites();
+  } catch (error) {
+    console.error("Failed to redeem pending invites:", error instanceof Error ? error.message : error);
+  }
+
+  const server = createTripkitMcpServer(repo, invites);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
   const shutdown = async () => {
     await server.close();
-    repo.close();
+    await pool.end();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
@@ -190,81 +204,36 @@ async function runMcpHttp(opts: ReturnType<typeof parseMcpArgs>): Promise<void> 
     process.exit(1);
   }
 
-  const dataDir = resolveDataDir();
-  const dbPath = resolveDbPath();
-  const db = openDatabase(dbPath);
-  const repo = new SqliteTripkitRepository(db);
-
-  let auth: AuthMode;
-  if (opts.oauth) {
-    let publicUrl: URL;
-    try {
-      publicUrl = new URL(opts.publicUrl!);
-    } catch {
-      console.error(`Invalid --public-url: ${opts.publicUrl}`);
-      process.exit(1);
-    }
-    auth = { kind: "oauth", publicUrl };
-  } else if (opts.supabaseUrl !== undefined) {
-    let publicUrl: URL;
-    let projectUrl: URL;
-    try {
-      publicUrl = new URL(opts.publicUrl!);
-    } catch {
-      console.error(`Invalid --public-url: ${opts.publicUrl}`);
-      process.exit(1);
-    }
-    try {
-      projectUrl = new URL(opts.supabaseUrl);
-    } catch {
-      console.error(`Invalid --supabase-url: ${opts.supabaseUrl}`);
-      process.exit(1);
-    }
-    // The dashboard (/ui, /api/*) connects to Postgres directly in this mode — fail before
-    // binding a port rather than letting the first browser visit hit a missing-config error.
-    if (!supabasePoolConfigFromEnv()) {
-      console.error(
-        "--supabase-url also requires SUPABASE_DB_HOST, SUPABASE_DB_USER, and SUPABASE_DB_PASSWORD " +
-          "to be set (the dashboard's Postgres connection) — see README.\n",
-      );
-      process.exit(1);
-    }
-    auth = { kind: "supabase", projectUrl, publicUrl, anonKey: opts.supabaseAnonKey! };
-  } else if (opts.noAuth) {
-    auth = { kind: "none" };
-  } else {
-    auth = { kind: "bearer", token: opts.token ?? randomBytes(24).toString("base64url") };
+  let publicUrl: URL;
+  let projectUrl: URL;
+  try {
+    publicUrl = new URL(opts.publicUrl!);
+  } catch {
+    console.error(`Invalid --public-url: ${opts.publicUrl}`);
+    process.exit(1);
+  }
+  try {
+    projectUrl = new URL(opts.supabaseUrl!);
+  } catch {
+    console.error(`Invalid --supabase-url: ${opts.supabaseUrl}`);
+    process.exit(1);
   }
 
-  const { close, generatedOwnerPassword } = await runHttpServer(repo, {
+  const { close } = await runHttpServer({
     host: opts.host,
     port: opts.port,
-    dataDir,
-    auth,
-    ownerPassword: opts.oauthPassword,
+    supabase: {
+      projectUrl,
+      publicUrl,
+      anonKey: opts.supabaseAnonKey!,
+      serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    },
   });
 
   console.log(`Tripkit MCP server listening on http://${opts.host}:${opts.port}/mcp`);
-  if (auth.kind === "bearer") {
-    console.log(`Authorization required: Bearer ${auth.token}`);
-  } else if (auth.kind === "none") {
-    console.log("Warning: running with --no-auth — anyone on your network can read and write this trip data.");
-  } else if (auth.kind === "supabase") {
-    console.log(`Supabase auth enabled (project: ${auth.projectUrl}). MCP endpoint: ${new URL("/mcp", auth.publicUrl)}`);
-  } else {
-    console.log(`OAuth enabled. MCP endpoint: ${new URL("/mcp", auth.publicUrl)}`);
-  }
-
+  console.log(`Supabase auth enabled (project: ${projectUrl}). MCP endpoint: ${new URL("/mcp", publicUrl)}`);
   console.log(`\nDashboard: http://${opts.host}:${opts.port}/ui (day-by-day itinerary view)`);
-  if (auth.kind === "supabase") {
-    console.log("Sign in there with your Supabase Account (Supabase's own hosted login) — no owner passphrase in this mode.");
-  } else if (generatedOwnerPassword) {
-    console.log(`Owner passphrase (for /ui, and /authorize if using --oauth):`);
-    console.log(`  ${generatedOwnerPassword}`);
-    console.log(`(Saved as a hash under ${dataDir}; re-run with --oauth-password to change it.)`);
-  } else {
-    console.log("Using the previously set owner passphrase (pass --oauth-password to change it).");
-  }
+  console.log("Sign in there with your Supabase Account (Supabase's own hosted login).");
 
   const lanAddresses = listLanAddresses();
   if (lanAddresses.length > 0) {
@@ -278,7 +247,6 @@ async function runMcpHttp(opts: ReturnType<typeof parseMcpArgs>): Promise<void> 
 
   const shutdown = async () => {
     await close();
-    repo.close();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
@@ -294,50 +262,12 @@ async function runMcp(args: string[]): Promise<void> {
   }
 }
 
-function runInit(): void {
-  const cwd = process.cwd();
-  const alreadyInitialized = existsSync(join(cwd, ".tripkit"));
-  const dir = initProjectDataDir(cwd);
-  const dbPath = resolveDbPath(cwd);
-  openDatabase(dbPath).close();
-  console.log(alreadyInitialized ? `Already initialized: ${dir}` : `Initialized Tripkit data directory: ${dir}`);
-}
-
-async function runStatus(): Promise<void> {
-  const dataDir = resolveDataDir();
-  const dbPath = resolveDbPath();
-  const dbExists = existsSync(dbPath);
-  console.log(`Tripkit ${TRIPKIT_SERVER_VERSION}`);
-  console.log(`Data directory: ${dataDir}`);
-  console.log(`Database file:  ${dbPath} ${dbExists ? "" : "(not created yet)"}`);
-
-  if (!dbExists) {
-    console.log(`Run "tripkit init" or "tripkit mcp" to create it.`);
-    return;
-  }
-
-  const db = openDatabase(dbPath);
-  const repo = new SqliteTripkitRepository(db);
-  const trips = await repo.listTrips();
-  console.log(`Trips: ${trips.length}`);
-  for (const trip of trips) {
-    console.log(`  - ${trip.name} (${trip.startDate} → ${trip.endDate}) [${trip.id}]`);
-  }
-  repo.close();
-}
-
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
 
   switch (command) {
     case "mcp":
       await runMcp(rest);
-      return;
-    case "init":
-      runInit();
-      return;
-    case "status":
-      await runStatus();
       return;
     case "--help":
     case "-h":

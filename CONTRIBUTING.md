@@ -6,8 +6,7 @@ project's non-goals below.
 
 ## Development setup
 
-Requires Node.js >= 22 (Tripkit uses the built-in `node:sqlite` module, which
-needs no native build step).
+Requires Node.js >= 22.
 
 ```bash
 git clone https://github.com/kovartravis/tripkit.git
@@ -17,7 +16,15 @@ npm run build
 npm test
 ```
 
-To try the MCP server locally over stdio:
+`npm test` includes a `test/postgres/` suite that runs against a real
+Supabase project and skips itself when live-project credentials aren't
+configured — see those files' `loadEnvLocal`/`hasCreds` for the
+`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_DB_*` env vars
+(or `.env.local`, gitignored) it looks for.
+
+To try the MCP server locally over stdio (needs `TRIPKIT_SUPABASE_URL`,
+`TRIPKIT_SUPABASE_ACCESS_TOKEN`, `SUPABASE_SERVICE_ROLE_KEY`, and
+`SUPABASE_DB_*` set — see README):
 
 ```bash
 npm run build
@@ -33,21 +40,26 @@ Or point an MCP-capable client (Claude Desktop, etc.) at
 src/
   domain/     zod schemas, validation rules, and pure domain logic
               (packing generation, transit sketch, day-plan overlap check)
-  db/         storage: the TripkitRepository interface, SQLite schema,
-              and the SqliteTripkitRepository implementation
+  db/         storage: the TripkitRepository interface, and
+              db/postgres/'s SupabaseTripkitRepository implementation
+              (RLS-enforced, per-request JWT forwarding)
   export/     markdown and ICS export, built on top of the repository
-  mcp/        MCP server wiring and the 14 tripkit_* tool registrations
-  cli/        the `tripkit` CLI entry point (mcp / init / status)
-test/         vitest unit tests
+  mcp/        MCP server wiring, the tripkit_* tool registrations, OAuth
+              resource-server verification, and the /ui dashboard
+  cli/        the `tripkit` CLI entry point (mcp, stdio or --http)
+test/         vitest unit tests; test/postgres/ runs against a real
+              Supabase project and skips itself without live credentials
 docs/TOOLS.md per-tool parameter/return reference
+docs/adr/     standing architectural decisions (read before touching auth
+              or the repository layer)
 ```
 
 ## Making changes
 
 - **Storage changes** go through `TripkitRepository` (`src/db/repository.ts`).
   Add methods to the interface first, then implement them in
-  `SqliteTripkitRepository`. This keeps the door open for a future hosted
-  backend to implement the same interface.
+  `SupabaseTripkitRepository` (`src/db/postgres/supabaseTripkitRepository.ts`)
+  — the only implementation (ADR 0004: no local-only mode).
 - **New MCP tools** get their own file under `src/mcp/tools/`, registered
   from `src/mcp/server.ts`. Define the input/output shape as a zod schema in
   `src/domain/types.ts` first, and document the tool in `docs/TOOLS.md`.

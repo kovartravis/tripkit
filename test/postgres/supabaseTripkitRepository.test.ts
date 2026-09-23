@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from "node:fs";
 import type { Pool } from "pg";
 import { createSupabasePool, supabasePoolConfigFromEnv } from "../../src/db/postgres/pool.js";
 import { SupabaseTripkitRepository } from "../../src/db/postgres/supabaseTripkitRepository.js";
+import { SupabaseInviteService } from "../../src/db/postgres/invites.js";
 import { NotFoundError } from "../../src/db/repository.js";
 import { createTripkitMcpServer } from "../../src/mcp/server.js";
 import { exportMarkdown } from "../../src/export/markdown.js";
@@ -375,11 +376,12 @@ describe.skipIf(!hasCreds)("SupabaseTripkitRepository (live Postgres)", () => {
       expect(ics).toContain("SUMMARY:ANA NH7: SFO → HND");
     });
 
-    it("registers the same TripkitRepository-typed MCP server against a SupabaseTripkitRepository", () => {
-      // Type-level proof, exercised at runtime: SupabaseTripkitRepository satisfies
-      // TripkitRepository, so the exact same createTripkitMcpServer used for the SQLite
-      // backing accepts it unmodified.
-      const server = createTripkitMcpServer(ownerRepo);
+    it("registers an MCP server against a SupabaseTripkitRepository and SupabaseInviteService", () => {
+      const invites = new SupabaseInviteService(pool, { sub: ownerId, role: "authenticated" }, {
+        projectUrl: "https://example.supabase.co",
+        serviceRoleKey: "unused-in-this-test",
+      });
+      const server = createTripkitMcpServer(ownerRepo, invites);
       expect(server).toBeDefined();
     });
   });

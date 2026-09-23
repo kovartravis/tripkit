@@ -1,6 +1,6 @@
 # Tripkit
 
-**A local-first trip ledger, exposed as MCP tools.**
+**A shared trip ledger, exposed as MCP tools.**
 
 Tripkit is a Neuron-class OSS MCP server: it does not plan your trip or
 hold a conversation with you. Your personal agent (Claude, or any
@@ -17,12 +17,12 @@ you switch tools. There's nowhere for "the flight confirmation number,"
 "who's staying at which hotel," or "what's actually in the 2pm slot on
 Tuesday" to live in a form the agent can reliably re-read, update, and
 export later. Tripkit gives agents a small set of typed tools backed by a
-real local database, so trip state survives across sessions and tools.
+real database, so trip state survives across sessions, tools, and people.
 
 ## What Tripkit is / isn't
 
 **Owns (v1):**
-- A local-first trip ledger: trips, flights, stays, days, people
+- A trip ledger, shared per-Trip across Accounts: trips, flights, stays, days, people
 - MCP tools to add/update/query those entities
 - Constrained day plans (time-boxed blocks that can't overlap), packing
   lists, and rough transit sketches
@@ -35,15 +35,16 @@ real local database, so trip state survives across sessions and tools.
 - Live routing, pricing, or availability APIs — transit sketches are
   deterministic placeholder estimates, not real quotes
 
-**Deploy path:** local-first today — an stdio MCP server plus a CLI, backed
-by a SQLite file on disk. Storage sits behind a `TripkitRepository`
-interface so a hosted backend can be added later, once there's reason to;
-that's a deliberate non-goal for this release, not an oversight.
+**Deploy path:** hosted on Supabase (Postgres + Auth) — every Account reads
+and writes through MCP, authenticated per-request via their own Supabase
+identity, with Row Level Security enforcing that a Member only ever sees
+Trips they belong to. There is no local-only or account-free mode (ADR
+0004): storage sits behind a `TripkitRepository` interface, but the only
+implementation is `SupabaseTripkitRepository`.
 
 ## Install
 
-Requires **Node.js >= 22** (Tripkit uses the built-in `node:sqlite` module,
-so there's no native dependency to compile).
+Requires **Node.js >= 22**.
 
 ```bash
 npm install -g @kovartravis/tripkit
@@ -57,30 +58,41 @@ npx @kovartravis/tripkit mcp
 
 ## Quickstart
 
-Initialize a local data directory in your project (optional — Tripkit falls
-back to a per-user data directory if you skip this):
+Tripkit needs a Supabase project (Postgres + Auth, with Dynamic Client
+Registration enabled and the schema in `supabase/migrations/` applied) and
+a Supabase Account of your own before it can do anything. Set these env
+vars:
 
 ```bash
-npx tripkit init
-```
-
-Check where your data lives:
-
-```bash
-npx tripkit status
+export TRIPKIT_SUPABASE_URL=https://<ref>.supabase.co
+export TRIPKIT_SUPABASE_ACCESS_TOKEN=<your own Supabase session access token>
+export SUPABASE_SERVICE_ROLE_KEY=<the project's service_role key>
+export SUPABASE_DB_HOST=<pooler host>
+export SUPABASE_DB_USER=<pooler user>
+export SUPABASE_DB_PASSWORD=<pooler password>
 ```
 
 ### Connect it as an MCP server
 
-Tripkit speaks MCP over stdio. Point any MCP-capable client at it — for
-example, in Claude Desktop's `claude_desktop_config.json`:
+Tripkit speaks MCP over stdio, authenticated for the whole session as
+whichever Account `TRIPKIT_SUPABASE_ACCESS_TOKEN` belongs to. Point any
+MCP-capable client at it — for example, in Claude Desktop's
+`claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "tripkit": {
       "command": "npx",
-      "args": ["-y", "@kovartravis/tripkit", "mcp"]
+      "args": ["-y", "@kovartravis/tripkit", "mcp"],
+      "env": {
+        "TRIPKIT_SUPABASE_URL": "https://<ref>.supabase.co",
+        "TRIPKIT_SUPABASE_ACCESS_TOKEN": "...",
+        "SUPABASE_SERVICE_ROLE_KEY": "...",
+        "SUPABASE_DB_HOST": "...",
+        "SUPABASE_DB_USER": "...",
+        "SUPABASE_DB_PASSWORD": "..."
+      }
     }
   }
 }
@@ -91,6 +103,12 @@ Or run it directly:
 ```bash
 tripkit mcp
 ```
+
+For a shared, always-on deployment reachable by multiple Members (Owner
+and Companions alike, each through their own agent), run it over HTTP
+instead — see `tripkit --help` for `--http`'s flags. Each request
+authenticates against Supabase's own OAuth 2.1 server (dynamic client
+registration + PKCE); Tripkit is only ever the resource server.
 
 Once connected, your agent can call tools like `tripkit_trip_create`,
 `tripkit_flight_add`, and `tripkit_day_plan_set` to build up a trip, then
@@ -127,25 +145,26 @@ reference: [`docs/TOOLS.md`](docs/TOOLS.md).
 | `tripkit_query` | Structured filtered query over a trip's ledger |
 | `tripkit_export_markdown` | Export a trip or single day as markdown |
 | `tripkit_export_ics` | Export flights/stays/day blocks as an ICS calendar |
+| `tripkit_invite_create` | Invite a Companion by email to join a trip you own |
 
 ## CLI
 
 ```
-tripkit mcp       Start the Tripkit MCP server on stdio
-tripkit init      Initialize a local .tripkit/ data directory in this folder
-tripkit status    Show where Tripkit's data lives and a quick summary
+tripkit mcp              Start the Tripkit MCP server on stdio
+tripkit mcp --http ...   Serve MCP over HTTP, plus a read-only dashboard at /ui
+tripkit --help           Full flag/env var reference
 ```
 
 ## Storage
 
-Data lives in a SQLite file — either `.tripkit/tripkit.db` in the current
-project (after `tripkit init`), or a per-user data directory shared across
-projects if you haven't initialized one locally. Trips, people, flights,
-stays, days, day blocks, and packing items each get their own table, with
-foreign keys cascading from trips. All access goes through the
-`TripkitRepository` interface (`src/db/repository.ts`), so the storage
-layer can be swapped — for a hosted backend, say — without touching the MCP
-tool code.
+Data lives in Supabase Postgres. Trips, people, flights, stays, days, day
+blocks, packing items, and invites each get their own table, with foreign
+keys cascading from trips. All access goes through the `TripkitRepository`
+interface (`src/db/repository.ts`), implemented by
+`SupabaseTripkitRepository` (`src/db/postgres/`), which forwards each
+caller's verified JWT into a per-request Postgres transaction so Row Level
+Security — not application code — is what actually enforces that a Member
+only reads or writes Trips they belong to.
 
 ## Development
 
