@@ -65,7 +65,7 @@ export function renderDashboardPage(opts: DashboardPageOptions): string {
     <div id="status" class="text-sm text-neutral-500"></div>
     <div id="login" class="hidden max-w-sm mx-auto mt-16">
       <h2 class="text-lg font-semibold mb-4 text-center text-neutral-100">Sign in to Tripkit</h2>
-      <form id="loginForm" class="space-y-3">
+      <form id="loginForm" method="post" class="space-y-3">
         <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" required
           class="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
         <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" required
@@ -73,6 +73,17 @@ export function renderDashboardPage(opts: DashboardPageOptions): string {
         <button type="submit" class="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-2 text-sm font-medium text-white">Sign in</button>
         <p id="loginError" class="hidden text-sm text-red-400"></p>
       </form>
+    </div>
+    <div id="setPassword" class="hidden max-w-sm mx-auto mt-16">
+      <h2 class="text-lg font-semibold mb-1 text-center text-neutral-100">Set your password</h2>
+      <p class="text-sm text-neutral-400 mb-4 text-center">You're in — choose a password so you can sign back in next time.</p>
+      <form id="setPasswordForm" method="post" class="space-y-3">
+        <input id="newPassword" type="password" placeholder="New password" autocomplete="new-password" required minlength="6"
+          class="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
+        <button type="submit" class="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-2 text-sm font-medium text-white">Set password</button>
+        <p id="setPasswordError" class="hidden text-sm text-red-400"></p>
+      </form>
+      <button id="setPasswordBack" type="button" class="w-full mt-3 text-center text-sm text-neutral-500 hover:text-neutral-300 underline decoration-dotted underline-offset-2">Trouble with this link? Sign in instead</button>
     </div>
     <div id="app" class="hidden">
       <section class="mb-10">
@@ -179,13 +190,59 @@ export function renderDashboardPage(opts: DashboardPageOptions): string {
     ? window.supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey)
     : null;
 
-  function showLogin() {
+  // A password-reset or invite link's URL fragment (#access_token=...&type=recovery|invite) is
+  // consumed automatically by the client on load, signing the visitor in -- but they still need
+  // to choose a password. The PASSWORD_RECOVERY auth event alone isn't enough to gate that: it
+  // fires exactly once, during the original URL-fragment parse, and races against init()'s own
+  // getSession() check below with no ordering guarantee -- whichever settles last wins the DOM.
+  // A reload before the visitor submits a password loses the event entirely (Supabase already
+  // stripped the fragment from the URL) and would otherwise drop straight into the app. A flag
+  // in sessionStorage -- set synchronously from the raw hash before Supabase touches it, checked
+  // first thing in init(), and cleared only once a password is actually set -- makes "still needs
+  // to set a password" durable across both races and reloads within this tab.
+  function pendingPasswordSet() {
+    try { return sessionStorage.getItem('tripkitPendingPasswordSet') === '1'; }
+    catch (e) { return false; }
+  }
+  function setPendingPasswordSet() {
+    try { sessionStorage.setItem('tripkitPendingPasswordSet', '1'); } catch (e) { /* ignore */ }
+  }
+  function clearPendingPasswordSet() {
+    try { sessionStorage.removeItem('tripkitPendingPasswordSet'); } catch (e) { /* ignore */ }
+  }
+  if (supabaseClient) {
+    // Gated on supabaseClient existing: without it (e.g. the Supabase JS CDN script failed to
+    // load), nothing can ever validate the link or register the set-password form's submit
+    // handler either, so setting the flag here would strand the visitor on a dead form instead
+    // of the ordinary (broken either way, but at least legible) login screen.
+    if (/type=(recovery|invite)/.test(window.location.hash)) setPendingPasswordSet();
+    supabaseClient.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') { setPendingPasswordSet(); showSetPassword(); }
+    });
+  }
+
+  // The dashboard has three mutually exclusive top-level screens (status/app, login,
+  // set-password); showing one always means hiding the other two first, so every show*()
+  // routes through this instead of each repeating its own list of elements to hide.
+  function hideAllScreens() {
     document.getElementById('status').classList.add('hidden');
     document.getElementById('app').classList.add('hidden');
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('setPassword').classList.add('hidden');
+  }
+  function showLogin() {
+    hideAllScreens();
     document.getElementById('login').classList.remove('hidden');
   }
   function hideLogin() {
     document.getElementById('login').classList.add('hidden');
+  }
+  function showSetPassword() {
+    hideAllScreens();
+    document.getElementById('setPassword').classList.remove('hidden');
+  }
+  function hideSetPassword() {
+    document.getElementById('setPassword').classList.add('hidden');
   }
 
   async function api(path) {
@@ -379,6 +436,13 @@ export function renderDashboardPage(opts: DashboardPageOptions): string {
   }
 
   async function init() {
+    // Also requires supabaseClient itself: the set-password form's submit handler is only
+    // wired up inside the supabaseClient-guarded block below, so showing that screen without a
+    // client (e.g. the Supabase CDN script failed to load on a reload after the flag was set on
+    // an earlier, successful load) would leave the form's listener unattached -- submitting it
+    // would then fall through to the browser's native GET submission, leaking the typed
+    // password into the URL bar and history.
+    if (supabaseClient && pendingPasswordSet()) { showSetPassword(); return; }
     if (supabaseClient) {
       const { data } = await supabaseClient.auth.getSession();
       if (!data || !data.session) { showLogin(); return; }
@@ -420,6 +484,32 @@ export function renderDashboardPage(opts: DashboardPageOptions): string {
         return;
       }
       init();
+    });
+    document.getElementById('setPasswordForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const password = document.getElementById('newPassword').value;
+      const errorEl = document.getElementById('setPasswordError');
+      errorEl.classList.add('hidden');
+      const { error } = await supabaseClient.auth.updateUser({ password });
+      if (error) {
+        errorEl.textContent = error.message;
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      clearPendingPasswordSet();
+      hideSetPassword();
+      init();
+    });
+    document.getElementById('setPasswordBack').addEventListener('click', async () => {
+      // An expired, already-used, or otherwise invalid link never establishes a session, so
+      // updateUser() above just keeps failing -- this is the only way out of the set-password
+      // screen for that case, back to an ordinary sign-in (or a fresh reset request). But a
+      // *valid* link does establish a session before this button is ever seen, so signing out
+      // here too matters: without it, that session would just sit in localStorage and silently
+      // sign the visitor into the app on their next reload, skipping password setup entirely.
+      await supabaseClient.auth.signOut();
+      clearPendingPasswordSet();
+      showLogin();
     });
   }
 
